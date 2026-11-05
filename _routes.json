@@ -1,1 +1,1 @@
-{"version":1,"include":["/.netlify/functions/*"],"exclude":[]}
+{"version":1,"include":["/.netlify/functions/*","/__/auth/*","/__/firebase/*"],"exclude":[]}
