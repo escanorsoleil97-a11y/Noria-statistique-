@@ -1,7 +1,7 @@
 // Cloudflare Pages Function : transmet /.netlify/functions/* vers Netlify côté serveur.
 // Le navigateur ne contacte donc plus jamais *.netlify.app (utile quand ce domaine est bloqué).
 // Variable optionnelle (Cloudflare > Settings > Variables) : API_ORIGIN = https://votre-site.netlify.app
-const DEFAULT_API_ORIGIN = 'https://noria-education.netlify.app';
+const DEFAULT_API_ORIGIN = 'https://noria-statistique.netlify.app';
 
 export async function onRequest(context) {
   const url = new URL(context.request.url);
