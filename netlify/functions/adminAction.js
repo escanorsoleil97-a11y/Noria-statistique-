@@ -235,7 +235,15 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
         if (ADMIN_UIDS.has(targetUid)) {
           return { statusCode: 400, headers, body: JSON.stringify({ error: 'Impossible de supprimer le compte admin' }) };
         }
+        const tSnap = await db.collection('users').doc(targetUid).get();
+        if (tSnap.exists && tSnap.data().role) {
+          return { statusCode: 400, headers, body: JSON.stringify({ error: 'Impossible de supprimer un compte avec un rôle (admin)' }) };
+        }
         await db.collection('users').doc(targetUid).delete();
+        // Supprime aussi la connexion Firebase Auth (sinon un profil gratuit neuf serait recréé à la reconnexion)
+        try { await admin.auth().deleteUser(targetUid); }
+        catch (e) { if (!e || e.code !== 'auth/user-not-found') console.warn('deleteUser Auth:', e && e.message); }
+        try { await db.collection('sessions').doc(targetUid).delete(); } catch (e) {}
         return { statusCode: 200, headers, body: JSON.stringify({ ok: true, msg: 'Utilisateur supprimé' }) };
       }
 

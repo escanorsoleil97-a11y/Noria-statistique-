@@ -137,6 +137,7 @@ function buildDashboard(stats, users, uid, alerts) {
             ? `<button onclick="setSuspend('${u.uid}',false)" class="btn-act btn-green" title="Réactiver">✅</button>`
             : `<button onclick="setSuspend('${u.uid}',true)" class="btn-act btn-red" title="Suspendre">🚫</button>`
           }
+          ${u.role ? '' : `<button onclick="supprimerUtilisateur('${u.uid}')" class="btn-act btn-red" title="Supprimer le compte">🗑️</button>`}
         </div>
       </td>
     </tr>`;
@@ -662,7 +663,7 @@ function buildDashboard(stats, users, uid, alerts) {
           '</select><button onclick="addCredits(\\'' + uid + '\\')" class="btn-act" title="Ajouter crédits">+💳</button>' +
           '<button onclick="genererLienUpgrade(\\'' + uid + '\\')" class="btn-act" title="Générer un lien d’upgrade">🔗 Upgrade</button>' +
           '<button onclick="appliquerUpgrade(\\'' + uid + '\\')" class="btn-act btn-green" title="Appliquer l’upgrade">✅ Upgrade</button>' +
-          '<button onclick="modifierInfosUtilisateur(\\'' + uid + '\\')" class="btn-act" title="Modifier les informations utilisateur">✏️ Infos</button>' + suspendAction +
+          '<button onclick="modifierInfosUtilisateur(\\'' + uid + '\\')" class="btn-act" title="Modifier les informations utilisateur">✏️ Infos</button>' + suspendAction + (u.role ? '' : '<button onclick="supprimerUtilisateur(\\'' + uid + '\\')" class="btn-act btn-red" title="Supprimer le compte">🗑️</button>') +
           '</div></td></tr>';
       }).join('');
       filterTable();
@@ -1212,11 +1213,20 @@ function buildDashboard(stats, users, uid, alerts) {
       } catch (e) { showMsg('❌ ' + (e.message || 'Action impossible'), false); }
     }
 
+    async function supprimerUtilisateur(uid) {
+      if (!confirm('Supprimer définitivement ce compte (profil + connexion) ? Action irréversible.')) return;
+      try {
+        const r = await apiCall('deleteUser', uid, {});
+        showMsg(r.ok ? '✅ ' + r.msg : '❌ ' + (r.error || 'Erreur'), r.ok);
+        if (r.ok) setTimeout(loadUsersCurrent, 700);
+      } catch (e) { showMsg('❌ ' + (e.message || 'Suppression impossible'), false); }
+    }
+
     // Exposition explicite des handlers : les boutons sont injectés par innerHTML
     // et doivent rester appelables comme fonctions globales, notamment dans les
     // navigateurs mobiles et les contextes d’onglet isolé.
     Object.assign(window, {
-      switchTab, filterTable, loadUsersCurrent, setPlan, addCredits, setSuspend,
+      switchTab, filterTable, loadUsersCurrent, setPlan, addCredits, setSuspend, supprimerUtilisateur,
       genererLienUpgrade, genererLienChimi, appliquerUpgrade, modifierInfosUtilisateur,
       _inlineModalResolve
     });
