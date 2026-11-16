@@ -21,7 +21,7 @@ const MAX_REFERENCES = 5;
 exports.handler = async (event) => {
 const _origin = (event.headers && (event.headers.origin || event.headers.Origin)) || '';
   const _allowed = [process.env.SITE_ORIGIN, process.env.URL, process.env.DEPLOY_URL, process.env.DEPLOY_PRIME_URL,
-    'https://stat-analyse-pro.netlify.app','https://pstat-pro-all.netlify.app','https://statanalyse-pro.netlify.app','https://noria-education.pages.dev', 'https://noria-statistique.pages.dev']
+    'https://stat-analyse-pro.netlify.app','https://pstat-pro-all.netlify.app','https://statanalyse-pro.netlify.app','https://noria-education.pages.dev']
     .filter(Boolean).join(',').split(',').map(s => s.trim().replace(/\/$/, '')).filter(Boolean);
   const _originNorm = _origin.replace(/\/$/, '');
   const _allow = (_originNorm && _allowed.includes(_originNorm)) ? _originNorm : (_allowed[0] || 'https://pstat-pro-all.netlify.app');
@@ -61,7 +61,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
   catch (e) { return { statusCode: 400, headers, body: JSON.stringify({ error: 'Body invalide' }) }; }
 
   const theme     = (payload.theme || '').trim();
-  const style     = payload.style === 'vancouver' ? 'vancouver' : 'apa'; // APA (auteur-année) par défaut
+  const style     = payload.style === 'apa' ? 'apa' : 'vancouver'; // Vancouver par défaut
   const manualRaw = Array.isArray(payload.manualReferences) ? payload.manualReferences : [];
   const manualReferences = manualRaw.map(s => String(s || '').trim()).filter(Boolean).slice(0, MAX_REFERENCES);
 

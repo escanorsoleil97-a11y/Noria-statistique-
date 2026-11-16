@@ -17,7 +17,7 @@ const db = admin.firestore();
 exports.handler = async (event) => {
 const _origin = (event.headers && (event.headers.origin || event.headers.Origin)) || '';
   const _allowed = [process.env.SITE_ORIGIN, process.env.URL, process.env.DEPLOY_URL, process.env.DEPLOY_PRIME_URL,
-    'https://stat-analyse-pro.netlify.app','https://pstat-pro-all.netlify.app','https://statanalyse-pro.netlify.app','https://noria-education.pages.dev', 'https://noria-statistique.pages.dev']
+    'https://stat-analyse-pro.netlify.app','https://pstat-pro-all.netlify.app','https://statanalyse-pro.netlify.app','https://noria-education.pages.dev']
     .filter(Boolean).join(',').split(',').map(s => s.trim().replace(/\/$/, '')).filter(Boolean);
   const _originNorm = _origin.replace(/\/$/, '');
   const _allow = (_originNorm && _allowed.includes(_originNorm)) ? _originNorm : (_allowed[0] || 'https://pstat-pro-all.netlify.app');
@@ -60,7 +60,6 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
   try { body = JSON.parse(event.body || '{}'); } catch { return { statusCode: 400, headers, body: JSON.stringify({ error: 'JSON invalide' }) }; }
 
   const { theme, context, varsExactes, variableNames } = body;
-  const vdVerrouillee = (typeof body.vdVerrouillee === 'string' && Array.isArray(variableNames) && variableNames.includes(body.vdVerrouillee)) ? body.vdVerrouillee : '';
   if (!theme || typeof theme !== 'string') {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'theme manquant' }) };
   }
@@ -71,7 +70,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'variableNames manquant' }) };
   }
 
-  const prompt = buildPrompt({ theme, context, varsExactes, vdVerrouillee });
+  const prompt = buildPrompt({ theme, context, varsExactes });
   const nomsValides = new Set(variableNames);
 
   async function runCascadeOnce() {
@@ -102,7 +101,6 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
       return { statusCode: 502, headers, body: JSON.stringify({ error: "L'IA n'a pas retourné un nom de variable exact après vérification." }) };
     }
 
-    if (vdVerrouillee) result.variable_dependante = vdVerrouillee; // cohérence bivariée / régression
     return { statusCode: 200, headers, body: JSON.stringify(result) };
   } catch (e) {
     return { statusCode: 502, headers, body: JSON.stringify({ error: e.message || 'Erreur IA.' }) };
@@ -110,7 +108,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
 };
 
 // ── CONSTRUCTION DU PROMPT (portage exact depuis le client) ──────────────────
-function buildPrompt({ theme, context, varsExactes, vdVerrouillee = '' }) {
+function buildPrompt({ theme, context, varsExactes }) {
   const contextLabel = context === 'reg'
     ? 'régression (modélisation statistique)'
     : 'analyse bivariée (tableaux croisés, tests statistiques)';
@@ -123,8 +121,8 @@ ${varsExactes}
 RÈGLES ABSOLUES :
 1. "variable_dependante" = nom COPIÉ mot pour mot depuis la liste ci-dessus (respecte la casse et les accents exactement)
 2. "variables_independantes_suggerees" = noms COPIÉS mot pour mot depuis la liste
-3. Choisis la VD qui mesure directement l'outcome principal de l'étude, d'après le thème et l'objectif — appuie-toi sur le résumé statistique (une variable outcome est souvent binaire ou à faible variance de non-réponse, pas un simple identifiant à forte cardinalité ou à % de manquants élevé). La VD est UNIQUE pour toute l'étude : la même en analyse bivariée et en régression. Ne la choisis JAMAIS d'après une p-value ou un pourcentage élevé.${vdVerrouillee ? `\n3 bis. VD IMPOSÉE (déjà retenue pour l'étude, cohérence obligatoire) : "${vdVerrouillee}". Renvoie EXACTEMENT ce nom dans "variable_dependante" et justifie ce choix.` : ''}
-4. Pour les variables indépendantes suggérées, privilégie celles liées à l'objectif — préfère les variables qualitatives pour ${context === 'biv' ? 'le Chi²' : 'la régression logistique'} si la VD est catégorielle, ou numériques continues pour la régression linéaire
+3. Choisis la VD qui mesure directement l'outcome principal de l'étude — appuie-toi sur le résumé statistique (une variable outcome est souvent binaire ou à faible variance de non-réponse, pas un simple identifiant à forte cardinalité ou à % de manquants élevé)
+4. Priorité aux variables avec p-value potentiellement significative (p<0,05) — préfère les variables qualitatives pour ${context === 'biv' ? 'le Chi²' : 'la régression logistique'} si la VD est catégorielle, ou numériques continues pour la régression linéaire
 5. "justification" : 3 à 4 phrases directes et exploitables telles quelles dans la Discussion/Conclusion — explique pourquoi cette variable est l'outcome central (en t'appuyant sur son résumé statistique), puis pourquoi les VI choisies sont les facteurs associés les plus probables
 
 JSON STRICT, aucun texte autour :

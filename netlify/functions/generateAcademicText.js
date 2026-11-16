@@ -44,7 +44,7 @@ async function withTimeout(promise, ms, label) {
 exports.handler = async (event) => {
 const _origin = (event.headers && (event.headers.origin || event.headers.Origin)) || '';
   const _allowed = [process.env.SITE_ORIGIN, process.env.URL, process.env.DEPLOY_URL, process.env.DEPLOY_PRIME_URL,
-    'https://stat-analyse-pro.netlify.app','https://pstat-pro-all.netlify.app','https://statanalyse-pro.netlify.app','https://noria-education.pages.dev', 'https://noria-statistique.pages.dev']
+    'https://stat-analyse-pro.netlify.app','https://pstat-pro-all.netlify.app','https://statanalyse-pro.netlify.app','https://noria-education.pages.dev']
     .filter(Boolean).join(',').split(',').map(s => s.trim().replace(/\/$/, '')).filter(Boolean);
   const _originNorm = _origin.replace(/\/$/, '');
   const _allow = (_originNorm && _allowed.includes(_originNorm)) ? _originNorm : (_allowed[0] || 'https://pstat-pro-all.netlify.app');
@@ -237,8 +237,10 @@ function buildDiscussionPrompt(b) {
   const refsList = Array.isArray(references) ? references : [];
   const refsBlock = hasRefs && refsList.length ? `\n\nRÉFÉRENCES DISPONIBLES (citations réelles fournies — à utiliser, ne pas en inventer d'autres) :\n${refsList.join('\n')}` : '';
   const citationRule = hasRefs && refsList.length
-    ? `6. Pour la littérature : cite UNIQUEMENT les références fournies ci-dessus, au format auteur-année APA 7 dans le texte : « (Diallo, 2020) » pour 1 auteur, « (Diallo et Ngo, 2020) » pour 2 auteurs, « (Diallo et al., 2020) » pour 3 auteurs ou plus ; ou « Diallo et al. (2020) » en début de phrase. Relève le nom et l'année dans chaque référence fournie. N'utilise JAMAIS de numéros comme « [1] ». N'invente AUCUNE autre référence.`
-    : `6. Pour la littérature : formules comme « Des résultats similaires ont été observés dans des contextes comparables... » — SANS inventer d'auteurs, d'années ou de revues, et SANS numéros du type « [1] ».`;
+    ? (refStyle === 'apa'
+        ? `6. Pour la littérature : cite UNIQUEMENT les références fournies ci-dessus, au format APA dans le texte, ex. « (Diallo, 2023) ». N'invente AUCUNE autre référence.`
+        : `6. Pour la littérature : cite UNIQUEMENT les références fournies ci-dessus, au format Vancouver dans le texte, ex. « [1] », « [2] », en te basant sur leur numéro. N'invente AUCUNE autre référence.`)
+    : `6. Pour la littérature : formules comme « Des résultats similaires ont été observés dans des contextes comparables... » — SANS inventer d'auteurs, d'années ou de revues.`;
 
   return `Tu es un chercheur expert en biostatistiques et en rédaction académique. Rédige une DISCUSSION SCIENTIFIQUE rigoureuse en français académique pour un ${profileLabel}.
 

@@ -44,7 +44,7 @@ const PLAN_CREDITS = {
 exports.handler = async (event) => {
 const _origin = (event.headers && (event.headers.origin || event.headers.Origin)) || '';
   const _allowed = [process.env.SITE_ORIGIN, process.env.URL, process.env.DEPLOY_URL, process.env.DEPLOY_PRIME_URL,
-    'https://stat-analyse-pro.netlify.app','https://pstat-pro-all.netlify.app','https://statanalyse-pro.netlify.app','https://noria-education.pages.dev', 'https://noria-statistique.pages.dev']
+    'https://stat-analyse-pro.netlify.app','https://pstat-pro-all.netlify.app','https://statanalyse-pro.netlify.app','https://noria-education.pages.dev']
     .filter(Boolean).join(',').split(',').map(s => s.trim().replace(/\/$/, '')).filter(Boolean);
   const _originNorm = _origin.replace(/\/$/, '');
   const _allow = (_originNorm && _allowed.includes(_originNorm)) ? _originNorm : (_allowed[0] || 'https://pstat-pro-all.netlify.app');
@@ -235,15 +235,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
         if (ADMIN_UIDS.has(targetUid)) {
           return { statusCode: 400, headers, body: JSON.stringify({ error: 'Impossible de supprimer le compte admin' }) };
         }
-        const tSnap = await db.collection('users').doc(targetUid).get();
-        if (tSnap.exists && tSnap.data().role) {
-          return { statusCode: 400, headers, body: JSON.stringify({ error: 'Impossible de supprimer un compte avec un rôle (admin)' }) };
-        }
         await db.collection('users').doc(targetUid).delete();
-        // Supprime aussi la connexion Firebase Auth (sinon un profil gratuit neuf serait recréé à la reconnexion)
-        try { await admin.auth().deleteUser(targetUid); }
-        catch (e) { if (!e || e.code !== 'auth/user-not-found') console.warn('deleteUser Auth:', e && e.message); }
-        try { await db.collection('sessions').doc(targetUid).delete(); } catch (e) {}
         return { statusCode: 200, headers, body: JSON.stringify({ ok: true, msg: 'Utilisateur supprimé' }) };
       }
 
