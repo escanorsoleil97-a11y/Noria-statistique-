@@ -1,0 +1,6 @@
+/manifest.webmanifest
+  Cache-Control: no-cache
+/sw.js
+  Cache-Control: no-cache
+/icon-*
+  Cache-Control: public, max-age=3600
