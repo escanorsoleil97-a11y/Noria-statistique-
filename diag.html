@@ -1,0 +1,20 @@
+<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Diagnostic Noria</title>
+<style>body{font-family:system-ui,sans-serif;max-width:640px;margin:0 auto;padding:16px;background:#fff;color:#111}h1{font-size:1.2rem}.r{padding:8px 10px;border-radius:8px;margin:6px 0;font-size:.85rem;word-break:break-word}.ok{background:#dcfce7}.ko{background:#fee2e2}.in{background:#e0f2fe}button{padding:10px 14px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-size:.95rem;margin:6px 0}</style>
+<script src="https://accounts.google.com/gsi/client" async defer></script></head><body>
+<h1>Diagnostic de connexion Noria</h1><div id="out"></div>
+<button id="b1">Tester la connexion Google</button>
+<script type="module">
+import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import{initializeAppCheck,ReCaptchaV3Provider,getToken}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check.js";
+import{getFirestore,doc,getDoc}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import{getAuth,GoogleAuthProvider,signInWithCredential,signOut}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+const out=document.getElementById('out');const log=(t,c)=>{const d=document.createElement('div');d.className='r '+c;d.textContent=t;out.appendChild(d)};
+log('Adresse du site : '+location.origin,'in');log('Navigateur : '+navigator.userAgent.substring(0,110),'in');
+const app=initializeApp({apiKey:"AIzaSyA3pT5-TNZTiOUz3AeMRUBdblucyp0EWSI",authDomain:"pstat-pro-all.netlify.app",projectId:"statanalyse-pro",appId:"1:548600157788:web:c4a4063ad1dc824e75b899"});
+let ac=null;try{ac=initializeAppCheck(app,{provider:new ReCaptchaV3Provider("6Lf4HIstAAAAAJI9u9RvcbWm5sk_42rwEgpT6ADZ")});const t=await getToken(ac,false);log('1. App Check (reCAPTCHA) : OK','ok')}catch(e){log('1. App Check ECHEC : '+(e.code||e.message)+' -> ajouter ce domaine dans la cle reCAPTCHA','ko')}
+try{const r=await fetch('/.netlify/functions/publishQuestionnaire',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const j=await r.text();log('2. Serveur : HTTP '+r.status+' '+j.substring(0,120),r.status==403&&/Origine/.test(j)?'ko':'ok')}catch(e){log('2. Serveur injoignable : '+e.message,'ko')}
+const db=getFirestore(app),auth=getAuth(app);
+document.getElementById('b1').onclick=()=>{if(!window.google){log('3. Script Google non charge (reseau bloque ?)','ko');return}
+google.accounts.id.initialize({client_id:"548600157788-dhr6bec6r76togqp1bkcflmdve9pjcqf.apps.googleusercontent.com",callback:async resp=>{log('3. Google a renvoye un jeton : OK','ok');try{const u=await signInWithCredential(auth,GoogleAuthProvider.credential(resp.credential));log('4. Firebase connexion : OK ('+u.user.email+')','ok');try{const s=await getDoc(doc(db,'users',u.user.uid));log('5. Profil Firestore : '+(s.exists()?'existe deja':'absent (sera cree a la 1ere connexion)'),'ok')}catch(e){log('5. Lecture profil ECHEC : '+(e.code||e.message),'ko')}await signOut(auth)}catch(e){log('4. Firebase ECHEC : '+(e.code||e.message),'ko')}}});
+google.accounts.id.renderButton(document.getElementById('gb'),{theme:'filled_white',size:'large'});log('Appuyez sur le bouton Google ci-dessous','in')};
+</script><div id="gb"></div></body></html>

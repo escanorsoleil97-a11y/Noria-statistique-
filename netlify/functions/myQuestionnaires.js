@@ -23,7 +23,7 @@ const MAX_VARS_LEN = 500000;
 exports.handler = async (event) => {
   const _origin = (event.headers && (event.headers.origin || event.headers.Origin)) || '';
   const _allowed = [process.env.SITE_ORIGIN, process.env.URL, process.env.DEPLOY_URL, process.env.DEPLOY_PRIME_URL,
-    'https://stat-analyse-pro.netlify.app', 'https://pstat-pro-all.netlify.app', 'https://statanalyse-pro.netlify.app', 'https://noria-education.pages.dev']
+    'https://stat-analyse-pro.netlify.app', 'https://pstat-pro-all.netlify.app', 'https://statanalyse-pro.netlify.app', 'https://noria-education.pages.dev','https://noria-statistique.pages.dev','https://noria-statistique.netlify.app']
     .filter(Boolean).join(',').split(',').map(s => s.trim().replace(/\/$/, '')).filter(Boolean);
   const _originNorm = _origin.replace(/\/$/, '');
   const _allow = (_originNorm && _allowed.includes(_originNorm)) ? _originNorm : (_allowed[0] || 'https://pstat-pro-all.netlify.app');
