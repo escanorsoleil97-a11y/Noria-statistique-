@@ -61,7 +61,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
   catch (e) { return { statusCode: 400, headers, body: JSON.stringify({ error: 'Body invalide' }) }; }
 
   const theme     = (payload.theme || '').trim();
-  const style     = payload.style === 'apa' ? 'apa' : 'vancouver'; // Vancouver par défaut
+  const style     = payload.style === 'vancouver' ? 'vancouver' : 'apa'; // APA par défaut
   const manualRaw = Array.isArray(payload.manualReferences) ? payload.manualReferences : [];
   const manualReferences = manualRaw.map(s => String(s || '').trim()).filter(Boolean).slice(0, MAX_REFERENCES);
 

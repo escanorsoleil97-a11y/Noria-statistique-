@@ -282,8 +282,8 @@ CONSIGNES STRICTES — RESPECTE-LES TOUTES SANS EXCEPTION :
 1. Structure : ${structureLabel}
 2. Exactement ${paras} paragraphe${paras > 1 ? 's' : ''} de conclusion (texte fluide).
 3. LONGUEUR PARAGRAPHES : MINIMUM ${wMin} mots et MAXIMUM ${wMax} mots au total. NE DÉPASSE PAS ${wMax} MOTS. Compte tes mots.
-4. Exactement ${recoCount} recommandations numérotées (1. 2. 3…), concrètes, directement issues des résultats, adressées aux ${targetLabel}.
-5. AUCUN titre, AUCUN sous-titre dans le corps — texte fluide pour les paragraphes.
+4. Après les paragraphes de conclusion, écris sur une ligne seule le mot RECOMMANDATIONS, puis exactement ${recoCount} recommandations numérotées (1. 2. 3…), concrètes, directement issues des résultats, adressées aux ${targetLabel}. Les recommandations doivent être clairement séparées de la conclusion.
+5. AUCUN autre titre ni sous-titre — texte fluide pour les paragraphes de conclusion (seule la ligne RECOMMANDATIONS est autorisée).
 6. AUCUN markdown : ni **, ni ##, ni *.
 7. Commence directement sans introduction du type "Voici la conclusion...".`.trim();
 }
