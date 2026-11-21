@@ -44,7 +44,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
       if (!authHeader.startsWith('Bearer ')) {
         return { statusCode: 401, headers, body: JSON.stringify({ error: 'Non authentifié.' }) };
       }
-      const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+      const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1], true);
       const uid = decoded.uid;
 
       const existing = await db.collection('ambassadors').doc(uid).get();
@@ -94,7 +94,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
       if (!authHeader.startsWith('Bearer ')) {
         return { statusCode: 401, headers, body: JSON.stringify({ error: 'Non authentifié.' }) };
       }
-      const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+      const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1], true);
       const uid = decoded.uid;
       const { code } = body;
       if (!code) return { statusCode: 400, headers, body: JSON.stringify({ error: 'code requis' }) };
@@ -141,7 +141,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
       if (!authHeader.startsWith('Bearer ')) {
         return { statusCode: 401, headers, body: JSON.stringify({ error: 'Non authentifié.' }) };
       }
-      const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+      const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1], true);
       const uid = decoded.uid;
       const ambSnap = await db.collection('ambassadors').doc(uid).get();
       if (!ambSnap.exists) return { statusCode: 200, headers, body: JSON.stringify({ ok: true, status: null }) };
@@ -186,7 +186,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
       if (!authHeader.startsWith('Bearer ')) {
         return { statusCode: 401, headers, body: JSON.stringify({ error: 'Non authentifié.' }) };
       }
-      const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+      const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1], true);
       const uid = decoded.uid;
       const notifSnap = await db.collection('ambassador_notifications')
         .where('ambassador_id', '==', uid).orderBy('created_at', 'desc').limit(20).get();
@@ -200,7 +200,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
       if (!authHeader.startsWith('Bearer ')) {
         return { statusCode: 401, headers, body: JSON.stringify({ error: 'Non authentifié.' }) };
       }
-      const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+      const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1], true);
       const uid = decoded.uid;
       const unreadSnap = await db.collection('ambassador_notifications')
         .where('ambassador_id', '==', uid).where('read', '==', false).limit(50).get();

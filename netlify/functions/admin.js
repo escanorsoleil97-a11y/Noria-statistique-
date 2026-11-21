@@ -30,7 +30,7 @@ async function verifyAdmin(token) {
   if (!token) throw new Error('Token manquant');
   let decoded;
   try {
-    decoded = await admin.auth().verifyIdToken(token);
+    decoded = await admin.auth().verifyIdToken(token, true);
   } catch (e) {
     throw new Error('Session invalide ou expirée (' + (e.code || e.message) + '). Rouvrez Admin depuis Noria Education.');
   }
@@ -82,6 +82,11 @@ async function loadAlerts() {
   }
 }
 
+// Échappement HTML (valeurs issues de la base : jamais injectées brutes)
+function esc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 // ── Générer le HTML du dashboard ─────────────────────────────────────────────
 function buildDashboard(stats, users, uid, alerts) {
   const planColors = { gratuit:'#94a3b8', standard:'#60a5fa', professionnel:'#a78bfa', premium:'#fbbf24', institution:'#34d399', centre_sante:'#f97316', ecole:'#22c55e', hopital_district:'#ef4444', pharmacie:'#f59e0b' };
@@ -114,30 +119,30 @@ function buildDashboard(stats, users, uid, alerts) {
     const statusBadge = u.suspended
       ? `<span class="badge-red">Suspendu</span>`
       : `<span class="badge-green">Actif</span>`;
-    const adminBadge = u.role ? ` <span class="badge-admin">${u.role}</span>` : '';
+    const adminBadge = u.role ? ` <span class="badge-admin">${esc(u.role)}</span>` : '';
     return `<tr>
-      <td>${u.email||'—'}${adminBadge}</td>
-      <td style="color:${planColors[u.plan]||'#fff'};font-weight:600">${planLabels[u.plan]||u.plan||'gratuit'}</td>
+      <td>${esc(u.email||'—')}${adminBadge}</td>
+      <td style="color:${planColors[u.plan]||'#fff'};font-weight:600">${esc(planLabels[u.plan]||u.plan||'gratuit')}</td>
       <td style="text-align:center">${u.credits??0}</td>
       <td>${expiry}</td>
       <td>${created}</td>
       <td>${statusBadge}</td>
       <td>
         <div style="display:flex;gap:4px;flex-wrap:wrap;">
-          <select onchange="setPlan('${u.uid}',this.value)" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:3px 6px;font-size:0.7rem;cursor:pointer;">
+          <select onchange="setPlan('${esc(u.uid)}',this.value)" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:3px 6px;font-size:0.7rem;cursor:pointer;">
             ${['gratuit','standard','professionnel','premium','institution','ecole','hopital_district','centre_sante','pharmacie'].map(p =>
               `<option value="${p}"${u.plan===p?' selected':''}>${p}</option>`
             ).join('')}
           </select>
-          <button onclick="addCredits('${u.uid}')" class="btn-act" title="Ajouter crédits">+💳</button>
-          <button onclick="genererLienUpgrade('${u.uid}')" class="btn-act" title="Générer un lien d'upgrade">🔗 Upgrade</button>
-          <button onclick="appliquerUpgrade('${u.uid}')" class="btn-act btn-green" title="Appliquer l'upgrade (après paiement reçu)">✅ Upgrade</button>
-          <button onclick="modifierInfosUtilisateur('${u.uid}')" class="btn-act" title="Modifier les informations utilisateur">✏️ Infos</button>
+          <button onclick="addCredits('${esc(u.uid)}')" class="btn-act" title="Ajouter crédits">+💳</button>
+          <button onclick="genererLienUpgrade('${esc(u.uid)}')" class="btn-act" title="Générer un lien d'upgrade">🔗 Upgrade</button>
+          <button onclick="appliquerUpgrade('${esc(u.uid)}')" class="btn-act btn-green" title="Appliquer l'upgrade (après paiement reçu)">✅ Upgrade</button>
+          <button onclick="modifierInfosUtilisateur('${esc(u.uid)}')" class="btn-act" title="Modifier les informations utilisateur">✏️ Infos</button>
           ${u.suspended
-            ? `<button onclick="setSuspend('${u.uid}',false)" class="btn-act btn-green" title="Réactiver">✅</button>`
-            : `<button onclick="setSuspend('${u.uid}',true)" class="btn-act btn-red" title="Suspendre">🚫</button>`
+            ? `<button onclick="setSuspend('${esc(u.uid)}',false)" class="btn-act btn-green" title="Réactiver">✅</button>`
+            : `<button onclick="setSuspend('${esc(u.uid)}',true)" class="btn-act btn-red" title="Suspendre">🚫</button>`
           }
-          ${u.role ? '' : `<button onclick="supprimerCompte('${u.uid}')" class="btn-act btn-red" title="Supprimer définitivement le compte">🗑️</button>`}
+          ${u.role ? '' : `<button onclick="supprimerCompte('${esc(u.uid)}')" class="btn-act btn-red" title="Supprimer définitivement le compte">🗑️</button>`}
         </div>
       </td>
     </tr>`;
@@ -215,6 +220,7 @@ function buildDashboard(stats, users, uid, alerts) {
   <div class="tabs">
     <a href="#pane-stats" class="tab-btn active" data-tab="stats" aria-selected="true" role="button">📊 Statistiques</a>
     <a href="#pane-users" class="tab-btn" data-tab="users" aria-selected="false" role="button">👥 Utilisateurs</a>
+    <a href="#pane-questionnaires" class="tab-btn" data-tab="questionnaires" aria-selected="false" role="button">📋 Questionnaires</a>
     <a href="#pane-institutions" class="tab-btn" data-tab="institutions" aria-selected="false" role="button">🏛 Institutions</a>
     <a href="#pane-payments" class="tab-btn" data-tab="payments" aria-selected="false" role="button">💳 Paiements</a>
     <a href="#pane-alerts" class="tab-btn" data-tab="alerts" aria-selected="false" role="button">🚨 Alertes${alerts.length ? ` <span style="background:#f43f5e;color:#fff;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;">${alerts.length}</span>` : ''}</a>
@@ -266,6 +272,26 @@ function buildDashboard(stats, users, uid, alerts) {
       </table>
     </div>
     <div id="action-msg" class="msg"></div>
+  </div>
+
+  <!-- QUESTIONNAIRES -->
+  <div id="pane-questionnaires" class="tab-pane">
+    <div class="search">
+      <input type="text" id="q-srch" placeholder="Rechercher titre, propriétaire…" oninput="filterQuestionnaires()" style="flex:1;min-width:160px">
+      <button type="button" class="btn-act" onclick="loadQuestionnaires()">↻ Actualiser</button>
+      <button type="button" class="btn-act btn-red" onclick="deleteSelectedQuestionnaires()">🗑️ Supprimer la sélection</button>
+      <span id="q-status" style="align-self:center;color:#64748b;font-size:.72rem">Les données seront actualisées à l’ouverture.</span>
+    </div>
+    <div class="card" style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th style="width:28px"><input type="checkbox" id="q-all" onchange="toggleAllQuestionnaires(this.checked)"></th>
+          <th>Titre</th><th>Propriétaire</th><th>Créé</th><th style="text-align:center">Variables</th><th style="text-align:center">Réponses</th><th>État</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="q-tbody"></tbody>
+      </table>
+    </div>
+    <div id="q-msg" class="msg"></div>
   </div>
 
   <!-- INSTITUTIONS -->
@@ -559,6 +585,7 @@ function buildDashboard(stats, users, uid, alerts) {
       // Les appels sont centralisés ici afin d’éviter les panneaux statiques.
       const loaders = {
         users: () => loadUsersCurrent(),
+        questionnaires: () => loadQuestionnaires(),
         institutions: () => loadInstitutions(),
         alerts: () => loadAlerts(),
         groups: () => loadGroups(),
@@ -1208,13 +1235,144 @@ function buildDashboard(stats, users, uid, alerts) {
     }
     async function supprimerCompte(uid) {
       try {
-        const rep = await askInline('Suppression DÉFINITIVE du compte (connexion + données). Tapez SUPPRIMER pour confirmer :', '');
+        const rep = await askInline('Suppression DÉFINITIVE du compte (connexion + toutes ses données, questionnaires et réponses inclus). Tapez SUPPRIMER pour confirmer :', '');
         if (rep === null) return;
         if (String(rep).trim() !== 'SUPPRIMER') { showMsg('❌ Suppression annulée (confirmation incorrecte).', false); return; }
         const r = await apiCall('deleteUser', uid, { confirm: 'SUPPRIMER' });
         showMsg(r.ok ? '✅ ' + r.msg : '❌ ' + (r.error || 'Erreur'), r.ok);
       } catch (e) { showMsg('❌ ' + (e.message || 'Suppression impossible'), false); }
     }
+    // ── Questionnaires (admin) : liste, ouverture/fermeture, suppression définitive ──
+    function qMsg(msg, ok) {
+      var el = document.getElementById('q-msg');
+      if (!el) return;
+      el.textContent = msg;
+      el.className = 'msg ' + (ok ? 'ok' : 'err');
+      el.style.display = 'block';
+      setTimeout(function() { el.style.display = 'none'; }, ok ? 5000 : 9000);
+    }
+    function renderQuestionnaires(items) {
+      var tbody = document.getElementById('q-tbody');
+      if (!tbody) return;
+      tbody.textContent = '';
+      var all = document.getElementById('q-all'); if (all) all.checked = false;
+      if (!items.length) {
+        var tr0 = document.createElement('tr'), td0 = document.createElement('td');
+        td0.colSpan = 8; td0.style.cssText = 'text-align:center;color:#94a3b8;padding:24px';
+        td0.textContent = 'Aucun questionnaire.'; tr0.appendChild(td0); tbody.appendChild(tr0); return;
+      }
+      items.forEach(function(q) {
+        var tr = document.createElement('tr');
+        tr.setAttribute('data-qid', q.qid);
+        var tdc = document.createElement('td'), cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.className = 'q-sel'; cb.setAttribute('data-qid', q.qid);
+        tdc.appendChild(cb); tr.appendChild(tdc);
+        function cell(txt, center) { var td = document.createElement('td'); td.textContent = txt; if (center) td.style.textAlign = 'center'; tr.appendChild(td); return td; }
+        cell(q.title || 'Questionnaire');
+        cell(q.ownerEmail || q.ownerUid || '—');
+        cell(q.createdAt ? new Date(q.createdAt).toLocaleDateString('fr-FR') : '—');
+        cell(String(q.nVars || 0), true);
+        cell(q.responses == null ? '—' : String(q.responses), true);
+        var tds = document.createElement('td'), badge = document.createElement('span');
+        badge.className = q.visible ? 'badge-green' : 'badge-red';
+        badge.textContent = q.visible ? 'Ouvert' : 'Fermé';
+        tds.appendChild(badge); tr.appendChild(tds);
+        var tda = document.createElement('td'), wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap';
+        var bt = document.createElement('button');
+        bt.type = 'button'; bt.className = 'btn-act'; bt.setAttribute('data-q-act', 'toggle');
+        bt.setAttribute('data-qid', q.qid); bt.setAttribute('data-visible', q.visible ? '1' : '0');
+        bt.textContent = q.visible ? '⏸ Fermer' : '▶ Ouvrir';
+        var bd = document.createElement('button');
+        bd.type = 'button'; bd.className = 'btn-act btn-red'; bd.setAttribute('data-q-act', 'delete');
+        bd.setAttribute('data-qid', q.qid); bd.title = 'Supprimer définitivement';
+        bd.textContent = '🗑️ Supprimer';
+        wrap.appendChild(bt); wrap.appendChild(bd); tda.appendChild(wrap); tr.appendChild(tda);
+        tbody.appendChild(tr);
+      });
+      filterQuestionnaires();
+    }
+    function filterQuestionnaires() {
+      var input = document.getElementById('q-srch');
+      var s = input ? input.value.toLowerCase() : '';
+      document.querySelectorAll('#q-tbody tr').forEach(function(tr) {
+        tr.style.display = (!s || tr.textContent.toLowerCase().indexOf(s) !== -1) ? '' : 'none';
+      });
+    }
+    function toggleAllQuestionnaires(checked) {
+      document.querySelectorAll('#q-tbody tr').forEach(function(tr) {
+        if (tr.style.display === 'none') return;
+        var cb = tr.querySelector('.q-sel'); if (cb) cb.checked = !!checked;
+      });
+    }
+    async function loadQuestionnaires() {
+      var tbody = document.getElementById('q-tbody');
+      if (!tbody || window.__qLoading) return;
+      window.__qLoading = true;
+      tbody.textContent = '';
+      var trl = document.createElement('tr'), tdl = document.createElement('td');
+      tdl.colSpan = 8; tdl.style.cssText = 'text-align:center;color:#94a3b8;padding:24px';
+      tdl.textContent = '⏳ Chargement des questionnaires…'; trl.appendChild(tdl); tbody.appendChild(trl);
+      try {
+        var result = await apiCall('listQuestionnaires', null, {});
+        if (!result.ok) throw new Error(result.error || 'Impossible de charger les questionnaires');
+        window.__adminQuestionnaires = Array.isArray(result.items) ? result.items : [];
+        renderQuestionnaires(window.__adminQuestionnaires);
+        var st = document.getElementById('q-status');
+        if (st) st.textContent = window.__adminQuestionnaires.length + ' questionnaire(s) — mis à jour à ' + new Date().toLocaleTimeString('fr-FR');
+      } catch (e) {
+        tbody.textContent = '';
+        var tre = document.createElement('tr'), tde = document.createElement('td');
+        tde.colSpan = 8; tde.style.cssText = 'text-align:center;color:#f87171;padding:24px';
+        tde.textContent = '❌ ' + (e.message || e); tre.appendChild(tde); tbody.appendChild(tre);
+      } finally {
+        window.__qLoading = false;
+      }
+    }
+    function qTitle(qid) {
+      var it = (window.__adminQuestionnaires || []).find(function(x) { return x.qid === qid; });
+      return it ? it.title : qid;
+    }
+    async function supprimerQuestionnaire(qid) {
+      try {
+        var rep = await askInline('Suppression DÉFINITIVE du questionnaire « ' + qTitle(qid) + ' » et de toutes ses réponses. Tapez SUPPRIMER pour confirmer :', '');
+        if (rep === null) return;
+        if (String(rep).trim() !== 'SUPPRIMER') { qMsg('❌ Suppression annulée (confirmation incorrecte).', false); return; }
+        var r = await apiCall('deleteQuestionnaire', null, { qid: qid, confirm: 'SUPPRIMER' });
+        qMsg(r.ok ? '✅ ' + r.msg : '❌ ' + (r.error || 'Erreur'), r.ok);
+        if (r.ok) loadQuestionnaires();
+      } catch (e) { qMsg('❌ ' + (e.message || 'Suppression impossible'), false); }
+    }
+    async function deleteSelectedQuestionnaires() {
+      var ids = Array.prototype.map.call(document.querySelectorAll('#q-tbody .q-sel:checked'), function(cb) { return cb.getAttribute('data-qid'); });
+      if (!ids.length) { qMsg('❌ Aucun questionnaire sélectionné.', false); return; }
+      try {
+        var rep = await askInline('Suppression DÉFINITIVE de ' + ids.length + ' questionnaire(s) et de toutes leurs réponses. Tapez SUPPRIMER pour confirmer :', '');
+        if (rep === null) return;
+        if (String(rep).trim() !== 'SUPPRIMER') { qMsg('❌ Suppression annulée (confirmation incorrecte).', false); return; }
+        var okCount = 0, errCount = 0;
+        for (var i = 0; i < ids.length; i++) {
+          try { var r = await apiCall('deleteQuestionnaire', null, { qid: ids[i], confirm: 'SUPPRIMER' }); if (r.ok) okCount++; else errCount++; }
+          catch (_e) { errCount++; }
+        }
+        qMsg((errCount ? '⚠️ ' : '✅ ') + okCount + ' supprimé(s)' + (errCount ? ', ' + errCount + ' échec(s)' : ''), !errCount);
+        loadQuestionnaires();
+      } catch (e) { qMsg('❌ ' + (e.message || 'Suppression impossible'), false); }
+    }
+    document.getElementById('q-tbody').addEventListener('click', async function(ev) {
+      var btn = ev.target && ev.target.closest ? ev.target.closest('button[data-q-act]') : null;
+      if (!btn) return;
+      var qid = btn.getAttribute('data-qid'), act = btn.getAttribute('data-q-act');
+      if (act === 'delete') { supprimerQuestionnaire(qid); return; }
+      if (act === 'toggle') {
+        try {
+          var r = await apiCall('setQuestionnaireVisible', null, { qid: qid, visible: btn.getAttribute('data-visible') !== '1' });
+          qMsg(r.ok ? '✅ ' + r.msg : '❌ ' + (r.error || 'Erreur'), r.ok);
+          if (r.ok) loadQuestionnaires();
+        } catch (e) { qMsg('❌ ' + (e.message || 'Action impossible'), false); }
+      }
+    }, false);
+
     async function setSuspend(uid, suspended) {
       try {
         const r = await apiCall('setSuspend', uid, { suspended });
@@ -1227,6 +1385,7 @@ function buildDashboard(stats, users, uid, alerts) {
     // navigateurs mobiles et les contextes d’onglet isolé.
     Object.assign(window, {
       switchTab, filterTable, loadUsersCurrent, setPlan, addCredits, setSuspend, supprimerCompte,
+      loadQuestionnaires, filterQuestionnaires, toggleAllQuestionnaires, deleteSelectedQuestionnaires,
       genererLienUpgrade, genererLienChimi, appliquerUpgrade, modifierInfosUtilisateur,
       _inlineModalResolve
     });
@@ -1239,7 +1398,8 @@ function buildDashboard(stats, users, uid, alerts) {
 exports.handler = async (event) => {
   const headers = { 'Content-Type': 'text/html; charset=utf-8',
     'X-Frame-Options': 'DENY', 'X-Content-Type-Options': 'nosniff',
-    'Cache-Control': 'no-store' };
+    'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer',
+    'X-Robots-Tag': 'noindex, nofollow, noarchive' };
 
   // Token depuis query param ou header Authorization
   const token = event.queryStringParameters?.t

@@ -44,7 +44,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
       return { statusCode: 401, headers, body: JSON.stringify({ error: 'Token manquant' }) };
     }
     const idToken = authHeader.split('Bearer ')[1];
-    const decoded = await admin.auth().verifyIdToken(idToken);
+    const decoded = await admin.auth().verifyIdToken(idToken, true);
     const uid = decoded.uid;
 
     // ── Remboursement après échec IA : uniquement si le proxy a enregistré un échec

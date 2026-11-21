@@ -50,7 +50,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
   }
   let uid;
   try {
-    const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+    const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1], true);
     uid = decoded.uid;
   } catch (e) {
     return { statusCode: 401, headers, body: JSON.stringify({ error: 'Token invalide' }) };

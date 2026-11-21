@@ -107,7 +107,7 @@ async function handleRequest(event, allowOrigin) {
   }
   let callerUid;
   try {
-    callerUid = (await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1])).uid;
+    callerUid = (await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1], true)).uid;
   } catch (authErr) {
     return { statusCode: 401, headers, body: JSON.stringify({ error: 'Token invalide ou expiré' }) };
   }

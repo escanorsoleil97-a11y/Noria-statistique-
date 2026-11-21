@@ -51,7 +51,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
     if (!authHeader.startsWith('Bearer ')) {
       return { statusCode: 401, headers, body: JSON.stringify({ error: 'Token manquant' }) };
     }
-    const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+    const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1], true);
     if (!ADMIN_UIDS.has(decoded.uid)) {
       return { statusCode: 403, headers, body: JSON.stringify({ error: 'Accès refusé' }) };
     }

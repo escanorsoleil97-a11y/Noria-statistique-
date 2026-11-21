@@ -4,7 +4,7 @@ const db = admin.firestore();
 const PLANS = { standard: { label: '10 000 FCFA', credits: 100 }, professionnel: { label: '25 000 FCFA', credits: 500 }, premium: { label: '35 000 FCFA Premium', credits: 2000 } };
 const HEADERS = { 'Access-Control-Allow-Origin': (process.env.URL || process.env.DEPLOY_URL || 'https://stat-analyse-pro.netlify.app','https://pstat-pro-all.netlify.app').replace(/\/$/, ''), 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Content-Type': 'application/json' };
 function out(statusCode, body) { return { statusCode, headers: HEADERS, body: JSON.stringify(body) }; }
-async function currentUser(event) { const h = event.headers.authorization || event.headers.Authorization || ''; if (!h.startsWith('Bearer ')) throw new Error('Connexion requise'); return admin.auth().verifyIdToken(h.slice(7)); }
+async function currentUser(event) { const h = event.headers.authorization || event.headers.Authorization || ''; if (!h.startsWith('Bearer ')) throw new Error('Connexion requise'); return admin.auth().verifyIdToken(h.slice(7), true); }
 exports.handler = async event => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: HEADERS, body: '' };
   try {

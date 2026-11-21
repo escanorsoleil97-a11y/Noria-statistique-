@@ -6,7 +6,7 @@ cloudinary.config({ cloud_name: process.env.CLOUDINARY_CLOUD_NAME, api_key: proc
 const HEADERS = { 'Access-Control-Allow-Origin': (process.env.URL || process.env.DEPLOY_URL || 'https://stat-analyse-pro.netlify.app','https://pstat-pro-all.netlify.app').replace(/\/$/, ''), 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Content-Type': 'application/json' };
 const DAYS = 30 * 24 * 60 * 60 * 1000;
 function out(statusCode, body) { return { statusCode, headers: HEADERS, body: JSON.stringify(body) }; }
-async function uidFrom(event) { const h = event.headers.authorization || event.headers.Authorization || ''; if (!h.startsWith('Bearer ')) return null; return (await admin.auth().verifyIdToken(h.slice(7))).uid; }
+async function uidFrom(event) { const h = event.headers.authorization || event.headers.Authorization || ''; if (!h.startsWith('Bearer ')) return null; return (await admin.auth().verifyIdToken(h.slice(7), true)).uid; }
 function publicMedia(d) { const x = d.data(); return { id: d.id, title: x.title || '', description: x.description || '', type: x.type || 'video', niveau: x.niveau || '', filiere: x.filiere || '', matiere: x.matiere || '', duration: x.duration || '', thumbnailUrl: x.thumbnailUrl || '', priceChimis: Number.isInteger(x.priceChimis) ? x.priceChimis : 5, publishedAt: x.publishedAt || x.createdAt || '' }; }
 exports.handler = async event => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: HEADERS, body: '' };

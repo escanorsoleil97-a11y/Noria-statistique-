@@ -9,6 +9,7 @@ if (!admin.apps.length) {
   admin.initializeApp({ credential: admin.credential.cert(JSON.parse(raw)) });
 }
 const db = admin.firestore();
+const _secRL = require('./_security');
 
 const allowedOrigins = new Set(
   String(process.env.ALLOWED_ORIGINS || '')
@@ -41,6 +42,11 @@ exports.handler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin || '';
   if (event.httpMethod === 'OPTIONS') return response(204, '', origin);
   if (event.httpMethod !== 'POST') return response(405, { error: 'Méthode non autorisée' }, origin);
+
+  // Anti-bruteforce du token admin : plafond par IP (durable, échec ouvert)
+  if (!(await _secRL.rateLimitDurable('mr:' + _secRL.clientIp(event), { limit: 60, windowMs: 60000 }))) {
+    return response(429, { error: 'Trop de requêtes, réessayez dans une minute.' }, origin);
+  }
 
   if (String(event.body || '').length > 1024 * 1024) {
     return response(413, { error: 'Requête trop volumineuse' }, origin);

@@ -47,7 +47,7 @@ exports.handler = async (event) => {
   const idToken = authHeader.replace(/^Bearer\s+/i, '');
   if (!idToken) return reply(401, { error: 'Non authentifié.' });
   let uid;
-  try { uid = (await admin.auth().verifyIdToken(idToken)).uid; }
+  try { uid = (await admin.auth().verifyIdToken(idToken, true)).uid; }
   catch (e) { return reply(401, { error: 'Session invalide ou expirée.' }); }
 
   const raw = event.body || '';

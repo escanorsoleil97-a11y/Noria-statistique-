@@ -44,7 +44,7 @@ const H = {
 async function requireAuth(event) {
   const authHeader = event.headers.authorization || event.headers.Authorization || '';
   if (!authHeader.startsWith('Bearer ')) throw new Error('AUTH_REQUIRED');
-  return admin.auth().verifyIdToken(authHeader.slice(7));
+  return admin.auth().verifyIdToken(authHeader.slice(7), true);
 }
 
 function isoWeekKey(d) {

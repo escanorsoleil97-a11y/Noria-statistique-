@@ -6,6 +6,7 @@
 
 const admin = require('firebase-admin');
 const crypto = require('crypto');
+const _sec = require('./_security');
 if (!admin.apps.length) {
   const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
@@ -41,6 +42,100 @@ const PLAN_CREDITS = {
   pharmacie:      500,
 };
 
+
+// ══ Suppression DÉFINITIVE : helpers (idempotents, relançables en cas d'échec) ══
+const QID_RE = /^[A-Za-z0-9_-]{1,100}$/;
+const UID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+
+// Supprime tous les documents d'une collection dont `field == value`, par lots.
+async function deleteWhere(colName, field, value) {
+  let total = 0;
+  for (let guard = 0; guard < 2000; guard++) {
+    const snap = await db.collection(colName).where(field, '==', value).limit(400).get();
+    if (snap.empty) break;
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    total += snap.size;
+    if (snap.size < 400) break;
+  }
+  return total;
+}
+
+// Supprime un questionnaire et TOUT ce qui s'y rattache (réponses, tentatives,
+// compteurs anti-abus, token admin). Aucune copie ne subsiste.
+async function purgeQuestionnaire(qid) {
+  // Fermer d'abord : plus aucune nouvelle réponse pendant la suppression
+  try { await db.collection('questionnaires').doc(qid).update({ 'settings.isVisible': false }); } catch (_e) {}
+  const out = { responses: 0, attempts: 0 };
+  out.responses += await deleteWhere('responses', 'questionnaire_id', qid);
+  out.attempts  += await deleteWhere('attempts', 'qid', qid);
+  // Compteurs de tentatives : ids de la forme `${qid}_${ipHash}`
+  for (let guard = 0; guard < 500; guard++) {
+    const snap = await db.collection('questionnaire_attempt_counters')
+      .where(admin.firestore.FieldPath.documentId(), '>=', qid + '_')
+      .where(admin.firestore.FieldPath.documentId(), '<', qid + '_\uf8ff').limit(400).get();
+    if (snap.empty) break;
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    if (snap.size < 400) break;
+  }
+  await db.collection('questionnaires').doc(qid).delete();
+  await db.collection('questionnaire_admin').doc(qid).delete();
+  // Balayage final (une réponse en cours d'envoi pendant la suppression)
+  out.responses += await deleteWhere('responses', 'questionnaire_id', qid);
+  return out;
+}
+
+// Supprime toutes les données personnelles d'un utilisateur (hors pièces
+// comptables : transactions de paiement et commissions ambassadeur, conservées
+// pour la comptabilité).
+async function purgeUserData(uid) {
+  const out = { questionnaires: 0, responses: 0 };
+  // 1) Ses questionnaires (+ réponses, tentatives, tokens)
+  for (let guard = 0; guard < 500; guard++) {
+    const qs = await db.collection('questionnaires').where('owner_uid', '==', uid).limit(50).get();
+    if (qs.empty) break;
+    for (const q of qs.docs) {
+      const r = await purgeQuestionnaire(q.id);
+      out.questionnaires++; out.responses += r.responses;
+    }
+  }
+  const tokens = await db.collection('questionnaire_admin').where('owner_uid', '==', uid).limit(500).get();
+  for (const t of tokens.docs) { const r = await purgeQuestionnaire(t.id); out.questionnaires++; out.responses += r.responses; }
+  out.responses += await deleteWhere('responses', 'owner_uid', uid);
+  await deleteWhere('attempts', 'ownerUid', uid);
+
+  // 2) Fichiers Cloudinary des demandes d'aide (best-effort) puis les demandes
+  try {
+    if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+      const cloudinary = require('cloudinary').v2;
+      cloudinary.config({ cloud_name: process.env.CLOUDINARY_CLOUD_NAME, api_key: process.env.CLOUDINARY_API_KEY, api_secret: process.env.CLOUDINARY_API_SECRET });
+      const help = await db.collection('studentHelpRequests').where('uid', '==', uid).limit(200).get();
+      for (const h of help.docs) {
+        const d = h.data();
+        if (d.publicId) { try { await cloudinary.uploader.destroy(String(d.publicId), { resource_type: d.resourceType || 'image', invalidate: true }); } catch (_e) {} }
+      }
+    }
+  } catch (_e) {}
+
+  // 3) Collections rattachées à l'utilisateur par un champ uid
+  for (const col of ['savedDatabases', 'history', 'etudiantResultats', 'doc_analysis_logs', 'mediaTransactions',
+                     'aiCharges', 'studentHelpRequests', 'rewardRequests', 'chimiGrants', 'alerts']) {
+    await deleteWhere(col, 'uid', uid);
+  }
+  await deleteWhere('rewardRequests', 'userId', uid);
+
+  // 4) Espaces Gestion commerciale / Pharmacie / comptes institution (récursif, sous-collections incluses)
+  await db.recursiveDelete(db.collection('commercial').doc(uid));
+  await db.recursiveDelete(db.collection('pharmacy').doc(uid));
+  for (const [col] of [['institution_members'], ['institution_requests'], ['sessions']]) {
+    try { await db.collection(col).doc(uid).delete(); } catch (_e) {}
+  }
+  return out;
+}
+
 exports.handler = async (event) => {
 const _origin = (event.headers && (event.headers.origin || event.headers.Origin)) || '';
   const _allowed = [process.env.SITE_ORIGIN, process.env.URL, process.env.DEPLOY_URL, process.env.DEPLOY_PRIME_URL,
@@ -70,7 +165,9 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
     if (!authHeader.startsWith('Bearer ')) {
       return { statusCode: 401, headers, body: JSON.stringify({ error: 'Token manquant' }) };
     }
-    const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+    let decoded;
+    try { decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1], true); }
+    catch (_e) { return { statusCode: 401, headers, body: JSON.stringify({ error: 'Session invalide ou révoquée' }) }; }
     const callerUid = decoded.uid;
 
     // ── 2. Vérifier que c'est l'admin (double verrou : UID + role Firestore) ─
@@ -83,9 +180,17 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
       return { statusCode: 403, headers, body: JSON.stringify({ error: 'Rôle admin requis' }) };
     }
 
-    // ── 3. Parser l'action ───────────────────────────────────────────────────
-    const { action, targetUid, payload } = JSON.parse(event.body || '{}');
-    if (!action) return { statusCode: 400, headers, body: JSON.stringify({ error: 'action requise' }) };
+    // Anti-abus : plafond d'actions admin par minute (échec ouvert si Firestore indisponible)
+    if (!(await _sec.rateLimitDurable('adm:' + callerUid, { limit: 120, windowMs: 60000 }))) {
+      return { statusCode: 429, headers, body: JSON.stringify({ error: 'Trop de requêtes, réessayez dans une minute.' }) };
+    }
+
+    // ── 3. Parser l'action (taille plafonnée, pollution de prototype rejetée) ─
+    const { action, targetUid, payload } = _sec.body(event, 200000);
+    if (!action || typeof action !== 'string') return { statusCode: 400, headers, body: JSON.stringify({ error: 'action requise' }) };
+    if (targetUid != null && (typeof targetUid !== 'string' || !UID_RE.test(targetUid))) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'targetUid invalide' }) };
+    }
 
     // ── 4. Exécuter l'action ─────────────────────────────────────────────────
     switch (action) {
@@ -195,7 +300,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
         if (!targetUid || typeof payload?.amount !== 'number') {
           return { statusCode: 400, headers, body: JSON.stringify({ error: 'targetUid et amount requis' }) };
         }
-        if (payload.amount < 0 || payload.amount > 10000) {
+        if (!Number.isInteger(payload.amount) || payload.amount < 0 || payload.amount > 10000) {
           return { statusCode: 400, headers, body: JSON.stringify({ error: 'Montant invalide (0–10 000)' }) };
         }
         await db.collection('users').doc(targetUid).update({
@@ -229,7 +334,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
         return { statusCode: 200, headers, body: JSON.stringify({ ok: true, msg: 'Compteur réinitialisé' }) };
       }
 
-      // Supprimer définitivement un utilisateur : compte de connexion Firebase + fiche + session
+      // Supprimer DÉFINITIVEMENT un utilisateur : toutes ses données, puis son compte de connexion
       case 'deleteUser': {
         if (!targetUid || typeof targetUid !== 'string' || targetUid.length > 128) {
           return { statusCode: 400, headers, body: JSON.stringify({ error: 'targetUid requis' }) };
@@ -243,11 +348,20 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
         const tRef = db.collection('users').doc(targetUid);
         const tSnap = await tRef.get();
         const tData = tSnap.exists ? tSnap.data() : {};
-        if (tData && (tData.role === 'admin' || tData.role === 'superadmin')) {
+        const tRole = String((tData && tData.role) || '').trim().toLowerCase();
+        if (['admin', 'adnim', 'superadmin', 'super_admin'].includes(tRole)) {
           return { statusCode: 400, headers, body: JSON.stringify({ error: 'Impossible de supprimer un compte à rôle administrateur' }) };
         }
-        // 1) Révoquer les sessions puis supprimer le compte de connexion (sinon la personne se reconnecterait)
+        // 1) Couper les sessions immédiatement (le jeton ne sera plus accepté : checkRevoked)
         try { await admin.auth().revokeRefreshTokens(targetUid); } catch (_e) {}
+        // 2) Supprimer TOUTES les données de la personne (idempotent : en cas d'échec on peut relancer)
+        let purged;
+        try { purged = await purgeUserData(targetUid); }
+        catch (e) {
+          console.error('deleteUser purge:', e && e.message);
+          return { statusCode: 500, headers, body: JSON.stringify({ error: 'Suppression des données incomplète, réessayez (le compte n\'a pas été supprimé).' }) };
+        }
+        // 3) Supprimer le compte de connexion (sinon la personne se reconnecterait)
         try {
           await admin.auth().deleteUser(targetUid);
         } catch (e) {
@@ -255,17 +369,77 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
             return { statusCode: 500, headers, body: JSON.stringify({ error: 'Suppression du compte de connexion impossible : ' + (e && e.code || 'erreur') }) };
           }
         }
-        // 2) Supprimer la fiche et la session
+        // 4) Supprimer la fiche (en dernier : elle permet de relancer si une étape a échoué)
         await tRef.delete();
-        try { await db.collection('sessions').doc(targetUid).delete(); } catch (_e) {}
-        // 3) Trace d'audit (collection inaccessible aux clients : règle par défaut = refus)
+        // 5) Trace d'audit minimale (collection inaccessible aux clients : règle par défaut = refus)
         try {
           await db.collection('adminAudit').add({
             action: 'deleteUser', by: callerUid, target: targetUid,
-            targetEmail: tData.email || null, at: new Date().toISOString(),
+            targetEmail: tData.email || null, purged, at: new Date().toISOString(),
           });
         } catch (_e) {}
-        return { statusCode: 200, headers, body: JSON.stringify({ ok: true, msg: 'Compte supprimé définitivement' }) };
+        return { statusCode: 200, headers, body: JSON.stringify({ ok: true, msg: 'Compte et données supprimés définitivement' }) };
+      }
+
+      // ── Questionnaires : liste complète (tous propriétaires) ──────────────
+      case 'listQuestionnaires': {
+        const snap = await db.collection('questionnaires').limit(500).get();
+        const owners = {};
+        const items = await Promise.all(snap.docs.map(async (d) => {
+          const q = d.data();
+          let n = null;
+          try {
+            const rq = db.collection('responses').where('questionnaire_id', '==', d.id);
+            if (typeof rq.count === 'function') { n = (await rq.count().get()).data().count; }
+            else { n = (await rq.select().limit(5000).get()).size; }
+          } catch (_e) { n = null; }
+          if (q.owner_uid && !(q.owner_uid in owners)) {
+            try { owners[q.owner_uid] = (await db.collection('users').doc(q.owner_uid).get()).data()?.email || ''; }
+            catch (_e) { owners[q.owner_uid] = ''; }
+          }
+          let nVars = 0;
+          try { const a = JSON.parse(q.variables || '[]'); nVars = Array.isArray(a) ? a.length : 0; } catch (_e) {}
+          return {
+            qid: d.id, title: String(q.title || 'Questionnaire').slice(0, 200),
+            ownerUid: q.owner_uid || '', ownerEmail: owners[q.owner_uid] || '',
+            createdAt: q.created_at || '', nVars, responses: n,
+            visible: !(q.settings && q.settings.isVisible === false),
+          };
+        }));
+        items.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+        return { statusCode: 200, headers, body: JSON.stringify({ ok: true, items }) };
+      }
+
+      // ── Questionnaires : ouvrir / fermer les réponses ─────────────────────
+      case 'setQuestionnaireVisible': {
+        if (!payload || typeof payload.qid !== 'string' || !QID_RE.test(payload.qid) || typeof payload.visible !== 'boolean') {
+          return { statusCode: 400, headers, body: JSON.stringify({ error: 'qid et visible requis' }) };
+        }
+        const qRef = db.collection('questionnaires').doc(payload.qid);
+        if (!(await qRef.get()).exists) return { statusCode: 404, headers, body: JSON.stringify({ error: 'Questionnaire introuvable' }) };
+        await qRef.update({ 'settings.isVisible': payload.visible, updatedAt: new Date().toISOString() });
+        return { statusCode: 200, headers, body: JSON.stringify({ ok: true, msg: payload.visible ? 'Réponses ouvertes' : 'Réponses fermées' }) };
+      }
+
+      // ── Questionnaires : suppression DÉFINITIVE (questionnaire + réponses + tentatives + token) ──
+      case 'deleteQuestionnaire': {
+        if (!payload || typeof payload.qid !== 'string' || !QID_RE.test(payload.qid)) {
+          return { statusCode: 400, headers, body: JSON.stringify({ error: 'qid invalide' }) };
+        }
+        if (payload.confirm !== 'SUPPRIMER') {
+          return { statusCode: 400, headers, body: JSON.stringify({ error: 'Confirmation manquante (tapez SUPPRIMER)' }) };
+        }
+        const qSnap = await db.collection('questionnaires').doc(payload.qid).get();
+        const qd = qSnap.exists ? qSnap.data() : {};
+        const res = await purgeQuestionnaire(payload.qid);
+        try {
+          await db.collection('adminAudit').add({
+            action: 'deleteQuestionnaire', by: callerUid, target: payload.qid,
+            title: String(qd.title || '').slice(0, 200), ownerUid: qd.owner_uid || null,
+            deletedResponses: res.responses, at: new Date().toISOString(),
+          });
+        } catch (_e) {}
+        return { statusCode: 200, headers, body: JSON.stringify({ ok: true, msg: 'Questionnaire supprimé définitivement (' + res.responses + ' réponse(s) effacée(s))', deletedResponses: res.responses }) };
       }
 
       // Stats globales
@@ -704,6 +878,8 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
 
   } catch (e) {
     console.error('adminAction error:', e);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
+    // Ne jamais renvoyer le détail technique au navigateur (fuite d'information)
+    const st = e && Number.isInteger(e.status) && e.status >= 400 && e.status < 500 ? e.status : 500;
+    return { statusCode: st, headers, body: JSON.stringify({ error: st === 500 ? 'Erreur serveur' : (e.message || 'Requête invalide') }) };
   }
 };

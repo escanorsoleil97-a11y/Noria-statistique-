@@ -7,7 +7,7 @@ const ADMINS=new Set(['SBATLA0GmVbeYWWpWrPoRTTveb32','0f9FMESHK6gq5Gl77tquCETbFo
 const HEADERS={'Access-Control-Allow-Origin':(process.env.URL || process.env.DEPLOY_URL || 'https://stat-analyse-pro.netlify.app','https://pstat-pro-all.netlify.app').replace(/\/$/, ''),'Access-Control-Allow-Headers':'Content-Type, Authorization','Access-Control-Allow-Methods':'GET,POST,OPTIONS','Content-Type':'application/json'};
 const DEFAULTS={enabled:true,allowedPlans:{standard:false,professionnel:false,premium:true},limits:{standard:1,professionnel:2,premium:3}};
 function out(statusCode,body){return{statusCode,headers:HEADERS,body:JSON.stringify(body)}}
-async function userFrom(event){const h=event.headers.authorization||event.headers.Authorization||'';if(!h.startsWith('Bearer '))throw new Error('Token manquant');return admin.auth().verifyIdToken(h.slice(7))}
+async function userFrom(event){const h=event.headers.authorization||event.headers.Authorization||'';if(!h.startsWith('Bearer '))throw new Error('Token manquant');return admin.auth().verifyIdToken(h.slice(7), true)}
 async function adminFrom(event){const d=await userFrom(event);if(!ADMINS.has(d.uid))throw new Error('Accès admin requis');return d}
 async function getConfig(){const s=await db.collection('settings').doc('studentHelp').get(),d=s.exists?s.data():{};return{enabled:d.enabled!==false,allowedPlans:{...DEFAULTS.allowedPlans,...(d.allowedPlans||{})},limits:{...DEFAULTS.limits,...(d.limits||{})}}}
 function monthKey(){return new Date().toISOString().slice(0,7)}

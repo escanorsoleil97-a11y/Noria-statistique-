@@ -68,7 +68,7 @@ async function handleRequest(event, allowOrigin) {
   const authHeader = event.headers.authorization || event.headers.Authorization || '';
   if (!authHeader.startsWith('Bearer ')) return reply(401, { error: 'Non authentifié — token manquant' });
   let uid;
-  try { uid = (await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1])).uid; }
+  try { uid = (await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1], true)).uid; }
   catch (e) { return reply(401, { error: 'Token invalide ou expiré' }); }
   if (!(await _secRL.rateLimitDurable('ai:' + uid, { limit: 40, windowMs: 60000 }))) return reply(429, { error: 'Trop de requêtes, réessayez dans une minute.' });
 

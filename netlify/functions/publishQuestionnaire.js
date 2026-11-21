@@ -43,7 +43,7 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
 
   let uid;
   try {
-    const decoded = await admin.auth().verifyIdToken(idToken);
+    const decoded = await admin.auth().verifyIdToken(idToken, true);
     uid = decoded.uid;
   } catch (e) {
     return { statusCode: 401, headers, body: JSON.stringify({ error: 'Session invalide ou expirée.' }) };

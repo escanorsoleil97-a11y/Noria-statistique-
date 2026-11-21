@@ -15,7 +15,7 @@ function out(status,body,origin){return {statusCode:status,headers:headers(origi
 function cleanString(v,max=300){return typeof v==='string'?v.trim().slice(0,max):''}
 function num(v, fallback=0){const n=Number(v);return Number.isFinite(n)?n:fallback}
 function dateIso(v){const d=v?new Date(v):new Date(); return isNaN(d)?new Date().toISOString():d.toISOString()}
-async function auth(event){const h=event.headers?.authorization||event.headers?.Authorization||'';if(!h.startsWith('Bearer '))throw Object.assign(new Error('Authentification requise'),{status:401});try{return (await admin.auth().verifyIdToken(h.slice(7))).uid}catch(e){throw Object.assign(new Error('Session invalide ou expirée'),{status:401})}}
+async function auth(event){const h=event.headers?.authorization||event.headers?.Authorization||'';if(!h.startsWith('Bearer '))throw Object.assign(new Error('Authentification requise'),{status:401});try{return (await admin.auth().verifyIdToken(h.slice(7), true)).uid}catch(e){throw Object.assign(new Error('Session invalide ou expirée'),{status:401})}}
 function ownerBase(uid,instance){const inst=['1','2','3','4'].includes(String(instance))?String(instance):'1';return inst==='1'?db.collection('commercial').doc(uid):db.collection('commercial').doc(uid).collection('spaces').doc('inst'+inst)}
 function ownerRef(uid,col,id,instance){return ownerBase(uid,instance).collection(col).doc(id)}
 function docData(s){return {id:s.id,...s.data()}}

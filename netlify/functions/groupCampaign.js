@@ -13,7 +13,7 @@ const HEADERS = { 'Access-Control-Allow-Origin': (process.env.URL || process.env
 async function verifyAdmin(event) {
   const header = event.headers.authorization || event.headers.Authorization || '';
   if (!header.startsWith('Bearer ')) throw new Error('Token manquant');
-  const decoded = await admin.auth().verifyIdToken(header.slice(7));
+  const decoded = await admin.auth().verifyIdToken(header.slice(7), true);
   if (!ADMIN_UIDS.has(decoded.uid)) throw new Error('Accès refusé');
   const snap = await db.collection('users').doc(decoded.uid).get();
   if (!snap.exists || !['admin', 'adnim'].includes(snap.data().role || '')) throw new Error('Rôle admin requis');

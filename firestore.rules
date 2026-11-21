@@ -74,14 +74,10 @@ service cloud.firestore {
     // - le document doit obligatoirement porter l'uid du créateur
     // - les tailles restent bornées (anti-abus / anti-flood)
     match /questionnaires/{docId} {
-      allow create: if request.auth != null
-        && request.resource.data.owner_uid == request.auth.uid
-        && request.resource.data.title is string
-        && request.resource.data.variables is string
-        && request.resource.data.title.size() < 500
-        && request.resource.data.variables.size() < 500000
-        // Le token admin ne doit jamais transiter par un document public
-        && !request.resource.data.keys().hasAny(['admin_token']);
+      // Création fermée côté client : la publication passe exclusivement par
+      // publishQuestionnaire (Admin SDK), qui valide titre, tailles et réglages.
+      // Aucun client n'écrit directement dans cette collection.
+      allow create: if false;
 
       allow read: if true;
       allow update, delete: if false;
