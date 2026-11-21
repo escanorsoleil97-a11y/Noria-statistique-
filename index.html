@@ -1325,6 +1325,8 @@ em, i {
             </div>
 
             </div>
+            <!-- Parrainage + Mode : masqués (menu allégé) — éléments conservés dans le DOM pour ne casser aucun script -->
+            <div id="accountMenuHiddenExtras" style="display:none" aria-hidden="true">
             <!-- Parrainage -->
             <div style="padding:8px 14px 4px;font-size:0.62rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:1px;border-top:1px solid var(--border);">🎁 Parrainage</div>
             <div style="padding:6px 14px 10px;">
@@ -1347,6 +1349,7 @@ em, i {
             <button onclick="setUserMode('admin')" style="display:flex;align-items:center;gap:8px;">
               <span id="modeAdminCheck" style="color:var(--muted);">○</span> 🛡️ Administrateur
             </button>
+            </div>
 
             <!-- Navigation -->
             <div style="padding:8px 14px 4px;font-size:0.62rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:1px;border-top:1px solid var(--border);">Navigation</div>
@@ -8253,9 +8256,9 @@ Réponds en sections courtes: (1) reformulation du problème, (2) variable dépe
         var meta=[d,(it.nVars!=null?it.nVars+' question(s)':''),(it.responses!=null?'<b style="color:var(--accent)">'+it.responses+' réponse(s)</b>':''),(it.visible===false?'⛔ fermé':'')].filter(Boolean).join(' · ');
         return '<div class="noria-pub-item" data-i="'+i+'"><div class="noria-pub-title">'+esc(it.title||'Questionnaire')+'</div><div class="noria-pub-meta">'+meta+'</div>'+
           '<div class="noria-pub-link"><input type="text" readonly value="'+esc(linkOf(it.qid))+'" onclick="this.select()"><button type="button" class="btn btn-primary btn-sm" data-act="copy">Copier</button></div>'+
-          '<div class="noria-pub-actions"><button type="button" class="btn btn-secondary btn-sm" data-act="open">🔗 Ouvrir</button><button type="button" class="btn btn-secondary btn-sm" data-act="wa">💬 WhatsApp</button><button type="button" class="btn btn-secondary btn-sm" data-act="resp">📥 Voir les réponses</button>'+(fromLocal?'':'<button type="button" class="btn btn-secondary btn-sm" data-act="repub">🔁 Republier ici</button>')+'<button type="button" class="btn btn-secondary btn-sm" data-act="tok">🔑 Copier le token</button>'+(fromLocal?'':'<button type="button" class="btn btn-secondary btn-sm" data-act="vis">'+(it.visible===false?'✅ Rouvrir':'⛔ Fermer')+'</button><button type="button" class="btn btn-secondary btn-sm" style="color:#ef4444;border-color:#ef4444" data-act="del">🗑️ Supprimer</button>')+'</div></div>';
+          '<div class="noria-pub-actions"><button type="button" class="btn btn-secondary btn-sm" data-act="open">🔗 Ouvrir</button><button type="button" class="btn btn-secondary btn-sm" data-act="wa">💬 WhatsApp</button><button type="button" class="btn btn-secondary btn-sm" data-act="resp">📥 Voir les réponses</button>'+(fromLocal?'':'<button type="button" class="btn btn-secondary btn-sm" data-act="repub">🔁 Republier ici</button>')+'<button type="button" class="btn btn-secondary btn-sm" data-act="tok">🔑 Copier le token</button>'+'<button type="button" class="btn btn-secondary btn-sm" data-act="vis">'+(it.visible===false?'✅ Rouvrir':'⛔ Fermer')+'</button><button type="button" class="btn btn-secondary btn-sm" style="color:#ef4444;border-color:#ef4444" data-act="del">🗑️ Supprimer</button>'+'</div></div>';
       }).join('');
-    body._items=items;
+    body._items=items;body._local=!!fromLocal;
   }
   async function refreshPub(force){
     var body=$('noriaPubBody');if(!body)return;
@@ -8299,7 +8302,14 @@ Réponds en sections courtes: (1) reformulation du problème, (2) variable dépe
         try{
           await authFetch({action:'delete',qid:it.qid,confirm:true});
           toast('✅ Questionnaire supprimé.');refreshPub(true);
-        }catch(err){alert('Suppression impossible : '+(err&&err.message||err));b.disabled=false;b.textContent=od;}
+        }catch(err){
+          alert('Suppression impossible : '+(err&&err.message||err));b.disabled=false;b.textContent=od;
+          /* Liste locale (serveur injoignable) : proposer de retirer l'entrée de cet appareil */
+          if(it&&$('noriaPubBody')._local&&confirm('Retirer ce questionnaire de la liste de cet appareil ?\n(Il ne sera pas supprimé du serveur.)')){
+            try{localStorage.setItem('noria_pub_history',JSON.stringify(lsGet().filter(function(x){return x.qid!==it.qid;})));}catch(e3){}
+            refreshPub(true);
+          }
+        }
         return;
       }
       if(act==='repub'){
