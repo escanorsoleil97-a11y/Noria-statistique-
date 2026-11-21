@@ -229,14 +229,43 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
         return { statusCode: 200, headers, body: JSON.stringify({ ok: true, msg: 'Compteur réinitialisé' }) };
       }
 
-      // Supprimer un utilisateur (Firestore doc uniquement — pas Firebase Auth)
+      // Supprimer définitivement un utilisateur : compte de connexion Firebase + fiche + session
       case 'deleteUser': {
-        if (!targetUid) return { statusCode: 400, headers, body: JSON.stringify({ error: 'targetUid requis' }) };
-        if (ADMIN_UIDS.has(targetUid)) {
-          return { statusCode: 400, headers, body: JSON.stringify({ error: 'Impossible de supprimer le compte admin' }) };
+        if (!targetUid || typeof targetUid !== 'string' || targetUid.length > 128) {
+          return { statusCode: 400, headers, body: JSON.stringify({ error: 'targetUid requis' }) };
         }
-        await db.collection('users').doc(targetUid).delete();
-        return { statusCode: 200, headers, body: JSON.stringify({ ok: true, msg: 'Utilisateur supprimé' }) };
+        if (!payload || payload.confirm !== 'SUPPRIMER') {
+          return { statusCode: 400, headers, body: JSON.stringify({ error: 'Confirmation manquante (tapez SUPPRIMER)' }) };
+        }
+        if (targetUid === callerUid || ADMIN_UIDS.has(targetUid)) {
+          return { statusCode: 400, headers, body: JSON.stringify({ error: 'Impossible de supprimer un compte admin' }) };
+        }
+        const tRef = db.collection('users').doc(targetUid);
+        const tSnap = await tRef.get();
+        const tData = tSnap.exists ? tSnap.data() : {};
+        if (tData && (tData.role === 'admin' || tData.role === 'superadmin')) {
+          return { statusCode: 400, headers, body: JSON.stringify({ error: 'Impossible de supprimer un compte à rôle administrateur' }) };
+        }
+        // 1) Révoquer les sessions puis supprimer le compte de connexion (sinon la personne se reconnecterait)
+        try { await admin.auth().revokeRefreshTokens(targetUid); } catch (_e) {}
+        try {
+          await admin.auth().deleteUser(targetUid);
+        } catch (e) {
+          if (!e || e.code !== 'auth/user-not-found') {
+            return { statusCode: 500, headers, body: JSON.stringify({ error: 'Suppression du compte de connexion impossible : ' + (e && e.code || 'erreur') }) };
+          }
+        }
+        // 2) Supprimer la fiche et la session
+        await tRef.delete();
+        try { await db.collection('sessions').doc(targetUid).delete(); } catch (_e) {}
+        // 3) Trace d'audit (collection inaccessible aux clients : règle par défaut = refus)
+        try {
+          await db.collection('adminAudit').add({
+            action: 'deleteUser', by: callerUid, target: targetUid,
+            targetEmail: tData.email || null, at: new Date().toISOString(),
+          });
+        } catch (_e) {}
+        return { statusCode: 200, headers, body: JSON.stringify({ ok: true, msg: 'Compte supprimé définitivement' }) };
       }
 
       // Stats globales

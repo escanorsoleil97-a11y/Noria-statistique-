@@ -16,6 +16,7 @@ if (!admin.apps.length) {
   admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 }
 const db = admin.firestore();
+const _secRL = require('./_security');
 
 const MAX_ITEMS = 100;
 const MAX_VARS_LEN = 500000;
@@ -54,6 +55,13 @@ exports.handler = async (event) => {
   let body;
   try { body = JSON.parse(raw || '{}'); } catch { return reply(400, { error: 'JSON invalide' }); }
   if (!body || typeof body !== 'object' || Array.isArray(body)) return reply(400, { error: 'JSON objet attendu' });
+
+  // Anti-abus : actions qui modifient/suppriment limitées par utilisateur
+  if (['delete', 'setVisible', 'republish'].includes(body.action)) {
+    if (!(await _secRL.rateLimitDurable('qmut:' + uid, { limit: 20, windowMs: 60000 }))) {
+      return reply(429, { error: 'Trop de requêtes, réessayez dans une minute.' });
+    }
+  }
 
   try {
     // ── LISTE ─────────────────────────────────────────────────────────────
@@ -106,7 +114,44 @@ exports.handler = async (event) => {
       return reply(200, { ok: true, qid });
     }
 
-    return reply(400, { error: 'action invalide (list|republish)' });
+    // ── OUVRIR / FERMER les réponses (propriétaire uniquement) ───────────
+    if (body.action === 'setVisible') {
+      const qid = body.qid;
+      if (typeof qid !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(qid)) return reply(400, { error: 'qid invalide.' });
+      if (typeof body.visible !== 'boolean') return reply(400, { error: 'visible (booléen) requis.' });
+      const own = await db.collection('questionnaire_admin').doc(qid).get();
+      if (!own.exists || own.data().owner_uid !== uid) return reply(403, { error: 'Ce questionnaire ne vous appartient pas.' });
+      await db.collection('questionnaires').doc(qid).update({ 'settings.isVisible': body.visible, updated_at: new Date().toISOString() });
+      return reply(200, { ok: true, qid, visible: body.visible });
+    }
+
+    // ── SUPPRIMER (propriétaire uniquement : questionnaire + token + réponses) ──
+    if (body.action === 'delete') {
+      const qid = body.qid;
+      if (typeof qid !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(qid)) return reply(400, { error: 'qid invalide.' });
+      if (body.confirm !== true) return reply(400, { error: 'Confirmation requise.' });
+      const own = await db.collection('questionnaire_admin').doc(qid).get();
+      if (!own.exists || own.data().owner_uid !== uid) return reply(403, { error: 'Ce questionnaire ne vous appartient pas.' });
+      // 1) Fermer d'abord (plus aucune nouvelle réponse pendant la suppression)
+      try { await db.collection('questionnaires').doc(qid).update({ 'settings.isVisible': false }); } catch (e) { /* ignore */ }
+      // 2) Supprimer les réponses par lots
+      let deleted = 0;
+      for (let guard = 0; guard < 50; guard++) {
+        const snap = await db.collection('responses').where('questionnaire_id', '==', qid).limit(400).get();
+        if (snap.empty) break;
+        const batch = db.batch();
+        snap.docs.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+        deleted += snap.size;
+        if (snap.size < 400) break;
+      }
+      // 3) Supprimer le questionnaire puis le token admin
+      await db.collection('questionnaires').doc(qid).delete();
+      await db.collection('questionnaire_admin').doc(qid).delete();
+      return reply(200, { ok: true, qid, deletedResponses: deleted });
+    }
+
+    return reply(400, { error: 'action invalide (list|republish|setVisible|delete)' });
   } catch (e) {
     console.error('myQuestionnaires:', e && e.message);
     return reply(500, { error: 'Erreur serveur.' });

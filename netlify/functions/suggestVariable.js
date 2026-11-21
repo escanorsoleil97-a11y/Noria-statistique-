@@ -59,7 +59,10 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
   let body;
   try { body = JSON.parse(event.body || '{}'); } catch { return { statusCode: 400, headers, body: JSON.stringify({ error: 'JSON invalide' }) }; }
 
-  const { theme, context, varsExactes, variableNames } = body;
+  const { theme, context: _ctx, varsExactes, variableNames, needType: _need } = body;
+  // Contextes et exigences de type reconnus (uniformes pour tous les tests)
+  const context = ['biv', 'reg', 'adv'].includes(_ctx) ? _ctx : 'biv';
+  const needType = ['num', 'cat', 'bin', 'any'].includes(_need) ? _need : (context === 'reg' ? 'any' : 'cat');
   if (!theme || typeof theme !== 'string') {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'theme manquant' }) };
   }
@@ -70,8 +73,11 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'variableNames manquant' }) };
   }
 
-  const prompt = buildPrompt({ theme, context, varsExactes });
+  const cleanTheme = String(theme).slice(0, 600);
+  const prompt = buildPrompt({ theme: cleanTheme, context, varsExactes, needType });
   const nomsValides = new Set(variableNames);
+  const parsedVars = parseVars(String(varsExactes));
+  const eligible = (nom) => isEligibleVD(parsedVars[nom], needType);
 
   async function runCascadeOnce() {
     const cascade = [callDeepSeek, callCerebras, callGroq, callGemini, callMistral, callClaude];
@@ -93,13 +99,29 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
 
     // Retry unique si le nom de variable renvoyé n'est pas exact (même logique
     // que l'ancien code client : un seul passage de cascade supplémentaire).
-    if (result && !nomsValides.has(result.variable_dependante)) {
+    if (result && (!nomsValides.has(result.variable_dependante) || !eligible(result.variable_dependante))) {
       try { result = await runCascadeOnce(); } catch (e) { /* on garde le résultat précédent */ }
     }
 
-    if (!result || !nomsValides.has(result.variable_dependante)) {
-      return { statusCode: 502, headers, body: JSON.stringify({ error: "L'IA n'a pas retourné un nom de variable exact après vérification." }) };
+    // Garde-fou final : nom exact ET variable utilisable comme VD pour ce test
+    // (type attendu, pas d'identifiant, pas trop de valeurs manquantes).
+    if (!result || !nomsValides.has(result.variable_dependante) || !eligible(result.variable_dependante)) {
+      const fb = fallbackVD(parsedVars, variableNames, cleanTheme, needType);
+      if (!fb) {
+        return { statusCode: 502, headers, body: JSON.stringify({ error: "Aucune variable ne convient comme variable dépendante pour ce test (type attendu : " + needType + "). Vérifiez vos données ou choisissez manuellement." }) };
+      }
+      result = {
+        variable_dependante: fb,
+        justification: "Choix de repli (règles méthodologiques) : variable compatible avec le test, peu de valeurs manquantes et liée au thème de l'étude. Vérifiez qu'elle correspond bien à votre objectif principal.",
+        variables_independantes_suggerees: variableNames.filter(n => n !== fb && parsedVars[n] && !parsedVars[n].identifiant && parsedVars[n].manquants <= 40).slice(0, 5),
+      };
     }
+
+    // Nettoyage : VI = noms exacts, distincts de la VD, sans doublon
+    const vis = Array.isArray(result.variables_independantes_suggerees) ? result.variables_independantes_suggerees : [];
+    result.variables_independantes_suggerees = [...new Set(vis.filter(v => nomsValides.has(v) && v !== result.variable_dependante))].slice(0, 8);
+    result.justification = String(result.justification || '').slice(0, 1500);
+    result.needType = needType;
 
     return { statusCode: 200, headers, body: JSON.stringify(result) };
   } catch (e) {
@@ -107,11 +129,67 @@ const _origin = (event.headers && (event.headers.origin || event.headers.Origin)
   }
 };
 
-// ── CONSTRUCTION DU PROMPT (portage exact depuis le client) ──────────────────
-function buildPrompt({ theme, context, varsExactes }) {
+// ── ANALYSE DES VARIABLES (règles uniformes pour tous les tests) ─────────────
+// Ligne type : 3. "Nom" [quantitative] — min=1.0, max=9.0, 2.5% manquants
+function parseVars(txt) {
+  const out = {};
+  String(txt).split('\n').forEach(line => {
+    const m = line.match(/^\s*\d+\.\s*"(.+)"\s*\[([^\]]+)\]\s*—\s*(.*)$/);
+    if (!m) return;
+    const nom = m[1], typeLabel = m[2].toLowerCase(), rest = m[3];
+    const quant = /quanti|num/.test(typeLabel);
+    const mod = rest.match(/(\d+)\s*modalit/);
+    const manq = rest.match(/([\d.]+)%\s*manquants/);
+    const nMod = mod ? parseInt(mod[1], 10) : null;
+    out[nom] = {
+      nom, quant, nMod,
+      manquants: manq ? parseFloat(manq[1]) : 0,
+      // identifiant probable : nom évocateur ou catégorielle à très forte cardinalité
+      identifiant: /^(id|n°|num(éro)?|matricule|code|ref|référence|index|horodateur|timestamp|date)\b|\b(identifiant|id)$/i.test(nom) || (!quant && nMod !== null && nMod > 30),
+    };
+  });
+  return out;
+}
+function isEligibleVD(v, needType) {
+  if (!v) return false;
+  if (v.identifiant) return false;
+  if (v.manquants > 40) return false;
+  if (needType === 'num') return v.quant;
+  if (needType === 'bin') return !v.quant && v.nMod === 2;
+  if (needType === 'cat') return !v.quant && v.nMod !== null && v.nMod >= 2 && v.nMod <= 12;
+  // any : quantitative ou catégorielle exploitable
+  return v.quant || (v.nMod !== null && v.nMod >= 2 && v.nMod <= 12);
+}
+// Repli déterministe : proximité lexicale avec le thème, puis variable binaire, puis première éligible
+function fallbackVD(parsed, names, theme, needType) {
+  const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const tokens = new Set(norm(theme).split(/[^a-z0-9]+/).filter(t => t.length >= 4));
+  const cands = names.filter(n => isEligibleVD(parsed[n], needType));
+  if (!cands.length) return null;
+  const score = n => {
+    let s = 0;
+    norm(n).split(/[^a-z0-9]+/).forEach(t => { if (t.length >= 4 && tokens.has(t)) s += 3; });
+    const v = parsed[n];
+    if (!v.quant && v.nMod === 2) s += 1;
+    s -= v.manquants / 50;
+    return s;
+  };
+  return cands.slice().sort((x, y) => score(y) - score(x))[0];
+}
+
+// ── CONSTRUCTION DU PROMPT ───────────────────────────────────────────────────
+function buildPrompt({ theme, context, varsExactes, needType }) {
   const contextLabel = context === 'reg'
     ? 'régression (modélisation statistique)'
-    : 'analyse bivariée (tableaux croisés, tests statistiques)';
+    : context === 'adv'
+      ? 'test statistique avancé'
+      : 'analyse bivariée (tableaux croisés, tests statistiques)';
+  const typeRule = {
+    num: 'La VD DOIT être quantitative (test sur une moyenne / ANCOVA / non paramétrique).',
+    bin: 'La VD DOIT être qualitative à exactement 2 modalités (régression logistique / ROC).',
+    cat: 'La VD DOIT être qualitative avec 2 à 12 modalités (Chi² / V de Cramér).',
+    any: 'La VD peut être quantitative (régression linéaire) ou qualitative binaire (régression logistique).',
+  }[needType];
 
   return `Biostatisticien expert. Étude : "${theme}". Analyse : ${contextLabel}.
 
@@ -120,10 +198,11 @@ ${varsExactes}
 
 RÈGLES ABSOLUES :
 1. "variable_dependante" = nom COPIÉ mot pour mot depuis la liste ci-dessus (respecte la casse et les accents exactement)
-2. "variables_independantes_suggerees" = noms COPIÉS mot pour mot depuis la liste
-3. Choisis la VD qui mesure directement l'outcome principal de l'étude — appuie-toi sur le résumé statistique (une variable outcome est souvent binaire ou à faible variance de non-réponse, pas un simple identifiant à forte cardinalité ou à % de manquants élevé)
-4. Priorité aux variables avec p-value potentiellement significative (p<0,05) — préfère les variables qualitatives pour ${context === 'biv' ? 'le Chi²' : 'la régression logistique'} si la VD est catégorielle, ou numériques continues pour la régression linéaire
-5. "justification" : 3 à 4 phrases directes et exploitables telles quelles dans la Discussion/Conclusion — explique pourquoi cette variable est l'outcome central (en t'appuyant sur son résumé statistique), puis pourquoi les VI choisies sont les facteurs associés les plus probables
+2. "variables_independantes_suggerees" = noms COPIÉS mot pour mot depuis la liste, différents de la VD
+3. La VD est l'outcome principal de l'objectif de l'étude (ce que l'on cherche à expliquer ou à estimer). Elle se choisit sur le THÈME et les OBJECTIFS, JAMAIS d'après une p-value, une association observée ou un résultat attendu (ce serait du p-hacking).
+4. ${typeRule}
+5. Exclus les identifiants, dates/horodatages, variables à forte cardinalité et celles à plus de 40 % de valeurs manquantes.
+6. "justification" : 3 à 4 phrases exploitables dans la Discussion/Conclusion — pourquoi cette variable est l'outcome central (en t'appuyant sur le thème et son résumé statistique), puis pourquoi les VI choisies sont des facteurs plausibles (justification théorique, pas statistique).
 
 JSON STRICT, aucun texte autour :
 {"variable_dependante":"NomExactIci","justification":"3 à 4 phrases.","variables_independantes_suggerees":["Var1","Var2","Var3"]}`;

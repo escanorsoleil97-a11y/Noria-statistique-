@@ -137,6 +137,7 @@ function buildDashboard(stats, users, uid, alerts) {
             ? `<button onclick="setSuspend('${u.uid}',false)" class="btn-act btn-green" title="Réactiver">✅</button>`
             : `<button onclick="setSuspend('${u.uid}',true)" class="btn-act btn-red" title="Suspendre">🚫</button>`
           }
+          ${u.role ? '' : `<button onclick="supprimerCompte('${u.uid}')" class="btn-act btn-red" title="Supprimer définitivement le compte">🗑️</button>`}
         </div>
       </td>
     </tr>`;
@@ -662,7 +663,7 @@ function buildDashboard(stats, users, uid, alerts) {
           '</select><button onclick="addCredits(\\'' + uid + '\\')" class="btn-act" title="Ajouter crédits">+💳</button>' +
           '<button onclick="genererLienUpgrade(\\'' + uid + '\\')" class="btn-act" title="Générer un lien d’upgrade">🔗 Upgrade</button>' +
           '<button onclick="appliquerUpgrade(\\'' + uid + '\\')" class="btn-act btn-green" title="Appliquer l’upgrade">✅ Upgrade</button>' +
-          '<button onclick="modifierInfosUtilisateur(\\'' + uid + '\\')" class="btn-act" title="Modifier les informations utilisateur">✏️ Infos</button>' + suspendAction +
+          '<button onclick="modifierInfosUtilisateur(\\'' + uid + '\\')" class="btn-act" title="Modifier les informations utilisateur">✏️ Infos</button>' + suspendAction + (u.role ? '' : '<button onclick="supprimerCompte(\\'' + uid + '\\')" class="btn-act btn-red" title="Supprimer définitivement le compte">🗑️</button>') +
           '</div></td></tr>';
       }).join('');
       filterTable();
@@ -1205,6 +1206,15 @@ function buildDashboard(stats, users, uid, alerts) {
         if (r.ok) setTimeout(loadUsersCurrent, 700);
       } catch (e) { showMsg('❌ ' + (e.message || 'Modification impossible'), false); }
     }
+    async function supprimerCompte(uid) {
+      try {
+        const rep = await askInline('Suppression DÉFINITIVE du compte (connexion + données). Tapez SUPPRIMER pour confirmer :', '');
+        if (rep === null) return;
+        if (String(rep).trim() !== 'SUPPRIMER') { showMsg('❌ Suppression annulée (confirmation incorrecte).', false); return; }
+        const r = await apiCall('deleteUser', uid, { confirm: 'SUPPRIMER' });
+        showMsg(r.ok ? '✅ ' + r.msg : '❌ ' + (r.error || 'Erreur'), r.ok);
+      } catch (e) { showMsg('❌ ' + (e.message || 'Suppression impossible'), false); }
+    }
     async function setSuspend(uid, suspended) {
       try {
         const r = await apiCall('setSuspend', uid, { suspended });
@@ -1216,7 +1226,7 @@ function buildDashboard(stats, users, uid, alerts) {
     // et doivent rester appelables comme fonctions globales, notamment dans les
     // navigateurs mobiles et les contextes d’onglet isolé.
     Object.assign(window, {
-      switchTab, filterTable, loadUsersCurrent, setPlan, addCredits, setSuspend,
+      switchTab, filterTable, loadUsersCurrent, setPlan, addCredits, setSuspend, supprimerCompte,
       genererLienUpgrade, genererLienChimi, appliquerUpgrade, modifierInfosUtilisateur,
       _inlineModalResolve
     });
