@@ -79,7 +79,10 @@ service cloud.firestore {
       // Aucun client n'écrit directement dans cette collection.
       allow create: if false;
 
-      allow read: if true;
+      // Lecture d'UN questionnaire par son identifiant (le lien répondant) : publique.
+      // Lecture de la LISTE : fermée, pour qu'on ne puisse pas énumérer tous les questionnaires.
+      allow get: if true;
+      allow list: if false;
       allow update, delete: if false;
     }
 

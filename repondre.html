@@ -208,6 +208,18 @@ async function fsQuery(col, field, value) {
   return data.filter(d => d.document).map(d => fsToObj(d.document));
 }
 
+// Lecture d'UN document par son identifiant (le qid du lien). La règle Firestore n'autorise plus
+// la lecture de la collection entière (« list ») : impossible de récupérer la liste des questionnaires.
+async function fsGetDoc(col, id) {
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(String(id || ''))) return null;
+  const appCheckToken = await getAppCheckToken();
+  const url = `https://firestore.googleapis.com/v1/projects/${FS_PROJECT}/databases/(default)/documents/${col}/${encodeURIComponent(id)}?key=${FS_API_KEY}`;
+  const res = await fetch(url, { headers: appCheckToken ? {'X-Firebase-AppCheck': appCheckToken} : {} });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await res.text());
+  return fsToObj(await res.json());
+}
+
 async function fsAdd(col, obj) {
   const appCheckToken = await getAppCheckToken();
   const res = await fetch(
@@ -233,9 +245,9 @@ async function init() {
   const qid = new URLSearchParams(window.location.search).get('q');
   if (!qid) { showError('Lien invalide — aucun questionnaire spécifié.'); return; }
   try {
-    const results = await fsQuery('questionnaires', 'qid', qid);
-    if (!results.length) { showError('Questionnaire introuvable ou expiré.'); return; }
-    QUESTIONNAIRE = results[0];
+    const found = await fsGetDoc('questionnaires', qid);
+    if (!found) { showError('Questionnaire introuvable ou expiré.'); return; }
+    QUESTIONNAIRE = found;
     try { QUESTIONNAIRE.variables = JSON.parse(QUESTIONNAIRE.variables || '[]'); } catch(e) { QUESTIONNAIRE.variables = []; }
     if (!Array.isArray(QUESTIONNAIRE.variables)) QUESTIONNAIRE.variables = [];
     ATTEMPT = await callSecureFunction('startAttempt', { qid });

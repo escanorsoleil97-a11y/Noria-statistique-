@@ -558,9 +558,11 @@ function buildDashboard(stats, users, uid, alerts) {
   <script>
     // Token récupéré depuis localStorage de l'app principale
     // Le token de l’URL est le plus récent ; ne jamais privilégier un ancien token du localStorage.
-    const URL_TOKEN = new URLSearchParams(location.search).get('t') || '';
-    const TOKEN = URL_TOKEN || localStorage.getItem('sa_admin_token') || '';
-    if (URL_TOKEN) localStorage.setItem('sa_admin_token', URL_TOKEN);
+    // Le jeton n'est plus transmis dans l'adresse (historique, partage, journaux). Il est posé dans le
+    // stockage local à l'ouverture, puis renouvelé via Firebase (getFreshAdminToken).
+    // Toute adresse « ?t=… » résiduelle est effacée de la barre d'adresse.
+    if (location.search) { try { history.replaceState(null, '', location.pathname); } catch (_) {} }
+    const TOKEN = localStorage.getItem('sa_admin_token') || '';
 
     function switchTab(id, btn) {
       const pane = document.getElementById('pane-' + id);
@@ -1401,9 +1403,26 @@ exports.handler = async (event) => {
     'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer',
     'X-Robots-Tag': 'noindex, nofollow, noarchive' };
 
-  // Token depuis query param ou header Authorization
-  const token = event.queryStringParameters?.t
-    || (event.headers.authorization || '').replace('Bearer ', '');
+  // Jeton : corps de la requête POST (formulaire ou JSON) ou en-tête Authorization.
+  // Le paramètre d'adresse « ?t= » est refusé : une adresse se copie, s'historise et se journalise.
+  if (event.queryStringParameters && (event.queryStringParameters.t || event.queryStringParameters.token)) {
+    return { statusCode: 400, headers, body: `<!DOCTYPE html><html><body style="background:#0f172a;color:#f1f5f9;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;text-align:center;flex-direction:column;gap:12px">
+      <div style="font-size:2.5rem">🔄</div>
+      <h2 style="color:#fbbf24">Ancienne méthode d'ouverture</h2>
+      <p style="color:#64748b;max-width:420px">Pour votre sécurité, le jeton ne passe plus dans l'adresse. Actualisez l'application Noria puis rouvrez Admin depuis le menu.</p>
+      <a href="/" style="color:#10b981;font-size:0.85rem">← Retour à l'app</a>
+    </body></html>` };
+  }
+  let token = (event.headers.authorization || event.headers.Authorization || '').replace(/^Bearer\s+/i, '');
+  if (!token && event.httpMethod === 'POST') {
+    try {
+      const raw = event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : (event.body || '');
+      if (raw.length < 8192) {
+        const ct = String((event.headers['content-type'] || event.headers['Content-Type'] || '')).toLowerCase();
+        token = ct.includes('json') ? String((JSON.parse(raw || '{}')).t || '') : (new URLSearchParams(raw).get('t') || '');
+      }
+    } catch (_) { token = ''; }
+  }
 
   if (!token) {
     return { statusCode: 401, headers, body: `<!DOCTYPE html><html><body style="background:#0f172a;color:#f1f5f9;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;text-align:center;flex-direction:column;gap:12px">

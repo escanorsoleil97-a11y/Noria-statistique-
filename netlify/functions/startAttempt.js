@@ -85,6 +85,23 @@ exports.handler = async (event) => {
       return { statusCode: 403, headers, body: JSON.stringify({ error: "Ce questionnaire n'est plus disponible." }) };
     }
 
+    // Date de clôture et plafond de réponses fixés par le propriétaire (myQuestionnaires → setLimits)
+    if (settings.closesAt) {
+      const closeTs = Date.parse(settings.closesAt);
+      if (!isNaN(closeTs) && Date.now() > closeTs) {
+        return { statusCode: 403, headers, body: JSON.stringify({ error: 'La date limite de ce questionnaire est dépassée.' }) };
+      }
+    }
+    const maxResponses = Number.isInteger(settings.maxResponses) ? settings.maxResponses : 0; // 0 = illimité
+    if (maxResponses > 0) {
+      try {
+        const c = await db.collection('responses').where('questionnaire_id', '==', qid).count().get();
+        if (c.data().count >= maxResponses) {
+          return { statusCode: 403, headers, body: JSON.stringify({ error: 'Le nombre maximum de réponses est atteint pour ce questionnaire.' }) };
+        }
+      } catch (e) { console.warn('startAttempt count:', e && e.message); }
+    }
+
     const maxAttempts = Number.isInteger(settings.maxAttempts) ? settings.maxAttempts : 0; // 0 = illimité
     const timeLimitSeconds = Number.isInteger(settings.timeLimitSeconds) ? settings.timeLimitSeconds : 0; // 0 = pas de délai
 

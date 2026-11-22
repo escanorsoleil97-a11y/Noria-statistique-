@@ -57,7 +57,7 @@ exports.handler = async (event) => {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return reply(400, { error: 'JSON objet attendu' });
 
   // Anti-abus : actions qui modifient/suppriment limitées par utilisateur
-  if (['delete', 'setVisible', 'republish'].includes(body.action)) {
+  if (['delete', 'setVisible', 'republish', 'duplicate', 'setLimits'].includes(body.action)) {
     if (!(await _secRL.rateLimitDurable('qmut:' + uid, { limit: 20, windowMs: 60000 }))) {
       return reply(429, { error: 'Trop de requêtes, réessayez dans une minute.' });
     }
@@ -69,7 +69,7 @@ exports.handler = async (event) => {
       const adminSnap = await db.collection('questionnaire_admin').where('owner_uid', '==', uid).limit(MAX_ITEMS).get();
       const rows = adminSnap.docs.map(d => ({ qid: d.id, adminToken: d.data().admin_token, createdAt: d.data().created_at || '' }));
       const items = await Promise.all(rows.map(async (r) => {
-        let title = 'Questionnaire', nVars = 0, visible = true;
+        let title = 'Questionnaire', nVars = 0, visible = true, closesAt = '', maxResponses = 0;
         try {
           const q = await db.collection('questionnaires').doc(r.qid).get();
           if (q.exists) {
@@ -77,6 +77,8 @@ exports.handler = async (event) => {
             title = qd.title || title;
             try { const arr = JSON.parse(qd.variables || '[]'); nVars = Array.isArray(arr) ? arr.length : 0; } catch (e) { /* ignore */ }
             visible = !(qd.settings && qd.settings.isVisible === false);
+            closesAt = (qd.settings && qd.settings.closesAt) || '';
+            maxResponses = (qd.settings && Number.isInteger(qd.settings.maxResponses)) ? qd.settings.maxResponses : 0;
           } else { return null; } // questionnaire supprimé
         } catch (e) { /* ignore */ }
         let responses = null;
@@ -85,7 +87,7 @@ exports.handler = async (event) => {
           if (typeof rq.count === 'function') { const c = await rq.count().get(); responses = c.data().count; }
           else { const s = await rq.select().limit(5000).get(); responses = s.size; }
         } catch (e) { responses = null; }
-        return { qid: r.qid, adminToken: r.adminToken, createdAt: r.createdAt, title, nVars, visible, responses };
+        return { qid: r.qid, adminToken: r.adminToken, createdAt: r.createdAt, title, nVars, visible, closesAt, maxResponses, responses };
       }));
       const clean = items.filter(Boolean).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
       return reply(200, { ok: true, items: clean });
@@ -125,6 +127,51 @@ exports.handler = async (event) => {
       return reply(200, { ok: true, qid, visible: body.visible });
     }
 
+    // ── LIMITES : date de clôture et nombre maximum de réponses ───────────
+    // Appliquées côté serveur par startAttempt / submitAttempt (le répondant ne peut pas les contourner).
+    if (body.action === 'setLimits') {
+      const qid = body.qid;
+      if (typeof qid !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(qid)) return reply(400, { error: 'qid invalide.' });
+      const own = await db.collection('questionnaire_admin').doc(qid).get();
+      if (!own.exists || own.data().owner_uid !== uid) return reply(403, { error: 'Ce questionnaire ne vous appartient pas.' });
+      let closesAt = '';
+      if (body.closesAt) {
+        const t = Date.parse(body.closesAt);
+        if (isNaN(t)) return reply(400, { error: 'Date limite invalide.' });
+        closesAt = new Date(t).toISOString();
+      }
+      const maxRaw = Number(body.maxResponses || 0);
+      if (!Number.isInteger(maxRaw) || maxRaw < 0 || maxRaw > 100000) return reply(400, { error: 'Nombre maximum de réponses invalide (0 à 100000).' });
+      await db.collection('questionnaires').doc(qid).update({
+        'settings.closesAt': closesAt, 'settings.maxResponses': maxRaw, updated_at: new Date().toISOString(),
+      });
+      return reply(200, { ok: true, qid, closesAt, maxResponses: maxRaw });
+    }
+
+    // ── DUPLIQUER (nouveau lien + nouveau token, sans les réponses) ───────
+    if (body.action === 'duplicate') {
+      const qid = body.qid;
+      if (typeof qid !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(qid)) return reply(400, { error: 'qid invalide.' });
+      const own = await db.collection('questionnaire_admin').doc(qid).get();
+      if (!own.exists || own.data().owner_uid !== uid) return reply(403, { error: 'Ce questionnaire ne vous appartient pas.' });
+      const src = await db.collection('questionnaires').doc(qid).get();
+      if (!src.exists) return reply(404, { error: 'Questionnaire introuvable.' });
+      const owned = await db.collection('questionnaire_admin').where('owner_uid', '==', uid).limit(MAX_ITEMS + 1).get();
+      if (owned.size >= MAX_ITEMS) return reply(400, { error: 'Limite de ' + MAX_ITEMS + ' questionnaires atteinte. Supprimez-en avant de dupliquer.' });
+      const sd = src.data();
+      const newQid = db.collection('questionnaires').doc().id;
+      const adminToken = require('crypto').randomBytes(15).toString('hex');
+      const createdAt = new Date().toISOString();
+      const baseTitle = String(sd.title || 'Questionnaire').replace(/ \(copie\)$/, '');
+      const settings = Object.assign({}, sd.settings || {}, { isVisible: true, closesAt: '', maxResponses: 0 });
+      await db.collection('questionnaires').doc(newQid).set({
+        qid: newQid, title: (baseTitle + ' (copie)').slice(0, 500), variables: sd.variables || '[]',
+        created_at: createdAt, owner_uid: uid, settings,
+      });
+      await db.collection('questionnaire_admin').doc(newQid).set({ admin_token: adminToken, owner_uid: uid, created_at: createdAt });
+      return reply(200, { ok: true, qid: newQid, adminToken });
+    }
+
     // ── SUPPRIMER (propriétaire uniquement : questionnaire + token + réponses) ──
     if (body.action === 'delete') {
       const qid = body.qid;
@@ -151,7 +198,7 @@ exports.handler = async (event) => {
       return reply(200, { ok: true, qid, deletedResponses: deleted });
     }
 
-    return reply(400, { error: 'action invalide (list|republish|setVisible|delete)' });
+    return reply(400, { error: 'action invalide (list|republish|setVisible|setLimits|duplicate|delete)' });
   } catch (e) {
     console.error('myQuestionnaires:', e && e.message);
     return reply(500, { error: 'Erreur serveur.' });

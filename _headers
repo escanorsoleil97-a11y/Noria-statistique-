@@ -4,3 +4,9 @@
   Cache-Control: no-cache
 /icon-*
   Cache-Control: public, max-age=3600
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+/version.json
+  Cache-Control: no-store, no-cache, must-revalidate

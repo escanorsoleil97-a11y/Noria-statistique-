@@ -18,16 +18,30 @@ const db = admin.firestore();
 // Ce rate limit est une défense de surface : il bloque les spams depuis une IP
 // sur la même instance. Pour un rate limit global, utiliser Netlify Edge ou Redis.
 const _ipCalls = new Map();
-function checkIpRateLimit(ip) {
+// Limite glissante sur 1 minute. Sur mobile, beaucoup d'étudiants partagent la
+// même IP d'opérateur (CGNAT) : la limite par IP est donc large (AI_RATE_IP_MAX,
+// 120 par défaut) et la vraie protection est la limite par COMPTE (AI_RATE_UID_MAX, 30).
+function checkRate(key, maxReq) {
   const now = Date.now();
   const window = 60000; // 1 minute
-  const maxReq  = 20;
-  const calls = _ipCalls.get(ip) || [];
+  const calls = _ipCalls.get(key) || [];
   const recent = calls.filter(t => now - t < window);
   if (recent.length >= maxReq) return false;
   recent.push(now);
-  _ipCalls.set(ip, recent);
+  _ipCalls.set(key, recent);
+  if (_ipCalls.size > 5000) { for (const [k, v] of _ipCalls) { if (!v.length || now - v[v.length - 1] > window) _ipCalls.delete(k); } }
   return true;
+}
+const RATE_IP_MAX  = parseInt(process.env.AI_RATE_IP_MAX, 10)  || 120;
+const RATE_UID_MAX = parseInt(process.env.AI_RATE_UID_MAX, 10) || 30;
+
+// Classe une erreur fournisseur pour que le client affiche la vraie cause.
+function aiErrCode(err) {
+  const m = String((err && err.message) || '');
+  if (/^TIMEOUT_/.test(m) || (err && err.name === 'AbortError')) return 'timeout';
+  if ((err && err.status === 402) || /insufficient balance/i.test(m)) return 'balance';
+  if ((err && err.status === 429) || /rate.?limit|quota|too many|resource.?exhausted/i.test(m)) return 'rate_limit';
+  return 'provider';
 }
 
 // Providers autorisés (whitelist explicite — rejette tout provider non prévu)
@@ -125,13 +139,15 @@ async function handleRequest(event, allowOrigin) {
 
   // Liste des fournisseurs réellement configurés (le client saute les autres sans appel réseau)
   if (body.action === 'providers') {
-    return { statusCode: 200, headers, body: JSON.stringify({ providers: PROVIDER_ORDER.filter(isProviderConfigured) }) };
+    return { statusCode: 200, headers, body: JSON.stringify({ providers: PROVIDER_ORDER.filter(isProviderConfigured), timeoutMs: PROVIDER_TIMEOUT_MS }) };
   }
 
   // ── RATE LIMITING IP ── (les reprises d'une réponse coupée, body.cont, ne comptent pas)
   const clientIp = event.headers['x-forwarded-for']?.split(',')[0]?.trim() || 'unknown';
-  if (!body.cont && !checkIpRateLimit(clientIp)) {
-    return { statusCode: 429, headers, body: JSON.stringify({ error: 'Trop de requêtes — réessayez dans une minute' }) };
+  if (!body.cont && (!checkRate('uid:' + callerUid, RATE_UID_MAX) || !checkRate('ip:' + clientIp, RATE_IP_MAX))) {
+    // Le débit de chimis a déjà eu lieu : on enregistre l'échec pour autoriser le remboursement.
+    await _aiHealth(callerUid, false, new Error('rate_limit'));
+    return { statusCode: 429, headers, body: JSON.stringify({ error: 'Trop de requêtes — réessayez dans une minute', code: 'rate_limit' }) };
   }
 
   let { prompt, provider, model } = body;
@@ -176,10 +192,14 @@ async function handleRequest(event, allowOrigin) {
     console.error(`[proxy] Erreur ${provider}:`, err.message);
     await _aiHealth(callerUid, false, err);
     const _balance = err && (err.status === 402 || /insufficient balance/i.test(err.message || ''));
+    const _code = aiErrCode(err);
+    const _msg = _balance ? 'Service IA momentanément indisponible'
+      : _code === 'timeout' ? 'Délai dépassé : le fournisseur IA a mis trop de temps à répondre'
+      : err.message;
     return {
-      statusCode: 500,
+      statusCode: _code === 'timeout' ? 504 : _code === 'rate_limit' ? 429 : 500,
       headers,
-      body: JSON.stringify({ error: _balance ? 'Service IA momentanément indisponible' : err.message }),
+      body: JSON.stringify({ error: _msg, code: _code }),
     };
   }
 }

@@ -129,6 +129,16 @@ exports.handler = async (event) => {
     }
     const qData = qSnap.data();
 
+    const maxResponses = Number.isInteger(qData.settings && qData.settings.maxResponses) ? qData.settings.maxResponses : 0;
+    if (maxResponses > 0) {
+      try {
+        const c = await db.collection('responses').where('questionnaire_id', '==', qid).count().get();
+        if (c.data().count >= maxResponses) {
+          return { statusCode: 403, headers, body: JSON.stringify({ error: 'Le nombre maximum de réponses est atteint pour ce questionnaire.' }) };
+        }
+      } catch (e) { console.warn('submitAttempt count:', e && e.message); }
+    }
+
     const respRef = db.collection('responses').doc();
     await respRef.set({
       questionnaire_id: qid,

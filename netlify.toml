@@ -1,7 +1,7 @@
 [build]
   publish = "."
   functions = "netlify/functions"
-  command = "npm install --no-audit --no-fund"
+  command = "npm install --no-audit --no-fund && node scripts/bump-version.js"
 
 [build.environment]
   NODE_VERSION = "20"
@@ -30,6 +30,22 @@
   [headers.values]
     Cache-Control = "no-store, no-cache, must-revalidate"
     X-Robots-Tag = "noindex, nofollow, noarchive"
+
+# Toujours revalider la page d'accueil et le fichier de version (évite l'ancienne version en cache)
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/version.json"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
 
 # Ne jamais servir les règles ou fichiers de configuration internes.
 [[redirects]]
